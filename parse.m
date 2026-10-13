@@ -34,17 +34,18 @@
 #import "sh.h"
 
 @implementation Shell (Parser)
+
 /*
  * syntax
  *	empty
  *	syn1
  */
-
 - (struct Tree *) syntax: (char **) p1 end: (char **) p2
 {
 	while(p1 != p2) {
-		if([self anyCharacter: **p1 in: ";&\n"])
-			p1++; else
+		if([self anyCharacter: **p1 in: ";\n"])
+			p1++;
+		else
 			return [self syn1: p1 end: p2];
 	}
 	return(0);
@@ -53,10 +54,8 @@
 /*
  * syn1
  *	syn2
- *	syn2 & syntax
  *	syn2 ; syntax
  */
-
 - (struct Tree *) syn1: (char **) p1 end: (char **) p2
 {
 	register char **p;
@@ -75,23 +74,17 @@
 		l--;
 		continue;
 
-	case '&':
 	case ';':
 	case '\n':
 		if(l == 0) {
 			register struct Tree *t1;
 
-			l = **p;
 			t = [self tree];
 			t->DTYP = TLST;
 			t->DLEF = [self syn2: p1 end: p];
-			t->DFLG = 0;
-			if(l == '&') {
-				t1 = t->DLEF;
-				t->DFLG |= FAND|FPRS|FINT;
-			}
 			if((t1 = [self syntax: p+1 end: p2]))
-				t->DRIT = t1; else
+				t->DRIT = t1;
+			else
 				t->DRIT = 0;
 			return(t);
 		}
@@ -105,10 +98,49 @@
 /*
  * syn2
  *	syn3
- *	syn3 | syn2
+ *	syn3 & syn2
  */
-
 - (struct Tree *) syn2: (char **) p1 end: (char **) p2
+{
+	register char **p;
+	register struct Tree *t;
+	int l;
+
+	l = 0;
+	for(p=p1; p!=p2; p++)
+	switch(**p) {
+
+	case '(':
+		l++;
+		continue;
+
+	case ')':
+		l--;
+		continue;
+
+	case '&':
+		if(l == 0) {
+			t = [self tree];
+			t->DTYP = TAND; // Set to Async / Background token
+			if ((*p)[1] == '&')
+				t->DTYP = TAND2;
+			t->DLEF = [self syn3: p1 end: p];
+			t->DRIT = [self syn2: p+1 end: p2];
+			return(t);
+		}
+	}
+	if(l == 0)
+		return [self syn3: p1 end: p2]; // Fixed: fall through down to syn3
+	(*error)++;
+	return(0);
+}
+
+/*
+ * syn3
+ *	syn4
+ *	syn4 | syn3
+ */
+- (struct Tree *) syn3: (char **) p1 end: (char **) p2
 {
 	register char **p;
 	register int l;
@@ -127,26 +159,128 @@
 		continue;
 
 	case '|':
-	case '^':
 		if(l == 0) {
 			t = [self tree];
-			t->DTYP = TFIL;
-			t->DLEF = [self syn3: p1 end: p];
-			t->DRIT = [self syn2: p+1 end: p2];
-			t->DFLG = 0;
+			t->DTYP = TOR;
+			t->DLEF = [self syn4: p1 end: p];      // Evaluates high precedence left
+			t->DRIT = [self syn3: p+1 end: p2];    // Evaluates pipeline right
 			return(t);
 		}
 	}
-	return [self syn3: p1 end: p2];
+	return [self syn4: p1 end: p2]; // Fixed: Falls back to syn4 to avoid infinite loops
 }
 
 /*
- * syn3
+ * syn4
+ *	syn5
+ *	syn5 = syn4
+ */
+- (struct Tree *) syn4: (char **) p1 end: (char **) p2
+{
+	register char **p;
+	register int l;
+	register struct Tree *t;
+
+	l = 0;
+	for(p=p1; p!=p2; p++)
+	switch(**p) {
+
+	case '(':
+		l++;
+		continue;
+
+	case ')':
+		l--;
+		continue;
+
+	case '=':
+		if(l == 0) {
+			t = [self tree];
+			t->DTYP = TEQU;
+			t->DLEF = [self syn5: p1 end: p];
+			t->DRIT = [self syn4: p+1 end: p2];
+			return(t);
+		}
+	}
+	return [self syn5: p1 end: p2]; // Fixed: Falls back to syn5
+}
+
+/*
+ * syn5
+ *	syn6
+ *	syn6 > syn5
+ */
+- (struct Tree *) syn5: (char **) p1 end: (char **) p2
+{
+	register char **p;
+	register int l;
+	register struct Tree *t;
+
+	l = 0;
+	for(p=p1; p!=p2; p++)
+	switch(**p) {
+
+	case '(':
+		l++;
+		continue;
+
+	case ')':
+		l--;
+		continue;
+
+	case '>':
+		if(l == 0) {
+			t = [self tree];
+			t->DTYP = TGTR;
+			t->DLEF = [self syn6: p1 end: p];
+			t->DRIT = [self syn5: p+1 end: p2];
+			return(t);
+		}
+	}
+	return [self syn6: p1 end: p2]; // Fixed: Falls back to syn6
+}
+
+/*
+ * syn6
+ *	syn7
+ *	syn7 < syn6
+ */
+- (struct Tree *) syn6: (char **) p1 end: (char **) p2
+{
+	register char **p;
+	register int l;
+	register struct Tree *t;
+
+	l = 0;
+	for(p=p1; p!=p2; p++)
+	switch(**p) {
+
+	case '(':
+		l++;
+		continue;
+
+	case ')':
+		l--;
+		continue;
+
+	case '<':
+		if(l == 0) {
+			t = [self tree];
+			t->DTYP = TLSS;
+			t->DLEF = [self syn7: p1 end: p];
+			t->DRIT = [self syn6: p+1 end: p2];
+			return(t);
+		}
+	}
+	return [self syn7: p1 end: p2]; // Fixed: Falls back to syn7
+}
+
+/*
+ * syn7
  *	( syn1 ) [ < in  ] [ > out ]
  *	word word* [ < in ] [ > out ]
  */
-
-- (struct Tree *) syn3: (char **) p1 end: (char **) p2
+- (struct Tree *) syn7: (char **) p1 end: (char **) p2
 {
 	register char **p;
 	char **lp, **rp, *i, *o;
@@ -154,7 +288,7 @@
 	int n, l, c, flg;
 
 	flg = 0;
-	if(**p2 == ')')
+	if(p1 != p2 && **p2 == ')')
 		flg |= FPAR;
 	lp = 0;
 	rp = 0;
@@ -183,7 +317,8 @@
 	case '>':
 		p++;
 		if(p!=p2 && **p=='>')
-			flg |= FCAT; else
+			flg |= FCAT;
+		else
 			p--;
 
 	case '<':
@@ -216,7 +351,7 @@
 			(*error)++;
 		t = [self tree];
 		t->DTYP = TPAR;
-		t->DSTR = [self syn1: lp end: rp];
+		t->DSTR = (struct Tree *)[self syn1: lp end: rp];
 		goto out;
 	}
 	if(n == 0)
@@ -227,7 +362,6 @@
 	for(l=0; l<n; l++)
 		t->DARR[l] = p1[l];
 out:
-	t->DFLG = flg;
 	t->DLPT = i;
 	t->DRPT = o;
 	return(t);
