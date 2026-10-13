@@ -73,14 +73,28 @@ loop:
 
 	case '&':
 	case '|':
+	case '=':
 		*(*linep)++ = c;
-		if((*peekc=[self getCharacter: DOLREPL]) == c)
-			*peekc = 0;
+		c1 = [self getCharacter: DOLREPL];
+		if(c1 == c)
+			*(*line)++ = c1;
 		else
-			(*linep)--;
-	case ';':
+			*peekc = c1;
+		*(*linep)++ = '\0';
+		return;
+
 	case '<':
 	case '>':
+		*(*linep)++ = c;
+		c1 = [self getCharacter: DOLREPL];
+		if(c1 == '=')
+			*(*linep)++ = c;
+		else
+			*peekc = c1;
+		*(*linep)++ = '\0';
+		return;
+
+	case ';':
 	case '(':
 	case ')':
 	case '^':
@@ -196,7 +210,7 @@ getd:
 		else if (c == '*') {
 			if (*dolc > 1) {
 				*idolp = 1;
-				**dolp = (*dolp)[1];
+				*dolp = (*dolv)[1];
 			}
 			goto getd;
 		}
