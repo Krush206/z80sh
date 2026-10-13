@@ -1,2 +1,2 @@
-# objc_dyn
+# z80sh
 Work in progress.
