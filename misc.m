@@ -79,7 +79,7 @@
 	static char str[NUMSIZ];
 
 	i = n;
-	cp = &str[sizeof str - 1];
+	cp = &str[sizeof str - 2];
 	for (;;) {
 		*cp = i % 10 + '0';
 		i /= 10;
@@ -259,6 +259,13 @@
 	static int ret;
 
 	return symc = &ret;
+}
+
+- (int *) getScope
+{
+	static int ret;
+
+	return scope = &ret;
 }
 
 - (int *) getOrgFlag
