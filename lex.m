@@ -50,7 +50,27 @@ loop:
 	case '\t':
 		goto loop;
 
-	case '\'':	/* '...' : what you see is what you get */
+	case '\'':
+		/* 'c' : single character value, no escapes */
+		c = [self getCharacter: !DOLREPL];
+		c1 = [self getCharacter: !DOLREPL];
+		if(c1 != '\'') {
+			(*error)++;
+			while(c1 != '\'' && c1 != '\n')
+				c1 = [self getCharacter: !DOLREPL];
+			*peekc = c1;
+			return;
+		}
+		if(*linep + 4 > *elinep) {
+			[self error: ERR_CHAR code: 255];
+			(*gflg)++;
+			return;
+		}
+		(void) strcpy(*linep, [self integerToASCII: c&0177]);
+		while(**linep)
+			(*linep)++;
+		goto pack;
+
 	case '"':	/* "..." : \", \$, $ substitution */
 		c1 = c;
 		dolflag = (c == '"' && !*dolp) ? DOLREPQ : !DOLREPL;
@@ -74,9 +94,24 @@ loop:
 	case '&':
 	case '|':
 	case '=':
+	case '+':
+	case '-':
+	case '*':
+	case '/':
+	case '%':
 		*(*linep)++ = c;
 		c1 = [self getCharacter: DOLREPL];
 		if(c1 == c)
+			*(*linep)++ = c1;
+		else
+			*peekc = c1;
+		*(*linep)++ = '\0';
+		return;
+
+	case '!':
+		*(*linep)++ = c;
+		c1 = [self getCharacter: DOLREPL];
+		if(c1 == '=')
 			*(*linep)++ = c1;
 		else
 			*peekc = c1;
@@ -97,6 +132,8 @@ loop:
 	case ';':
 	case '(':
 	case ')':
+	case '{':
+	case '}':
 	case '^':
 	case '\n':
 		*(*linep)++ = c;
@@ -118,7 +155,7 @@ pack:
 			if ((c=[self getCharacter: !DOLREPL])=='\n') c = ' ';
 			else c |= QUOTE;
 		}
-		if([self anyCharacter: c in: " '\"\t;&<>()|^\n:"]) {
+		if([self anyCharacter: c in: " '\"\t;&<>()|^\n:=!+-*/%{}"]) {
 			*peekc = c;
 			if([self anyCharacter: c in: "\"'"])
 				goto loop;
@@ -154,11 +191,13 @@ null:
 	DOLREPQ ==> quoted substitution: "$1" = value of $1 for sure */
 - (int) getCharacter: (int) flag
 {
-	register char c;
+	register char c, c1;
 
 	if(*peekc) {
 		c = *peekc;
 		*peekc = 0;
+		if(c == '/' && flag == DOLREPL)
+			goto slash;
 		return(c);
 	}
 	if(*argp > *eargp) {
@@ -191,6 +230,26 @@ getd:
 		*dolp = 0;
 	}
 	c = [self readCharacter];
+slash:
+	if(c == '/' && flag == DOLREPL) {
+		/* comments live only outside quotes and expansion */
+		if((c1 = [self readCharacter]) == '/') {
+			while((c = [self readCharacter]) != '\n')
+				continue;
+		}
+		else if(c1 == '*') {
+		star:
+			while((c = [self readCharacter]) != '*')
+				continue;
+			if((c = [self readCharacter]) != '/') {
+				*peekc = c;
+				goto star;
+			}
+			goto getd;
+		}
+		else
+			*peekc = c1;
+	}
 	if(c == subchar && flag) {
 		c = [self readCharacter];
 		if(c>='0' && c<='9') {
@@ -227,8 +286,12 @@ getd:
 	register int c;
 
 	if (*arginp) {
-		if (**arginp == 1)
+		if (**arginp == 1) {
+			if([self braceDepth: args end: *argp] > 0)
+				[self error: ERR_SYNTAX code: 255];
+			printf("\thalt\n");
 			exit(*errval);
+		}
 		if ((c = *(*arginp)++) == 0) {
 			**arginp = 1;
 			c = '\n';
@@ -238,7 +301,13 @@ getd:
 	if (*onelflg==1)
 		exit(255);
 	if((rdstat = read(0, &cc, 1)) != 1) {
-		if(rdstat==0) exit(*errval); /* end of file*/
+		if(rdstat==0) {
+			/* end of file ends the program */
+			if([self braceDepth: args end: *argp] > 0)
+				[self error: ERR_SYNTAX code: 255];
+			printf("\thalt\n");
+			exit(*errval);
+		}
 		else exit(255); /* error */
 	}
 	if (cc=='\n' && *onelflg)
