@@ -3,11 +3,8 @@
 #import <stdlib.h>
 #import <string.h>
 #import <unistd.h>
-#import <signal.h>
-#import <setjmp.h>
 #import <errno.h>
 #import <sys/wait.h>
-#import <fcntl.h>
 #import <fcntl.h>
 
 #import "/usr/local/include/objc/Object.h"
@@ -40,6 +37,8 @@
 #define TELSE 26
 #define TDEREF 27
 #define TBLOCK 28
+#define TINPUT 29
+#define TOUTPUT 30
 #define TMUL 20
 #define TDIV 21
 #define TMOD 22
@@ -51,32 +50,23 @@
 
 #define LINSIZ 4000
 #define ARGSIZ 200
-#define EXPSIZ 1000
 #define TRESIZ 200
 #define NUMSIZ 12
 #define SYMSIZ 50
 #define SYMNAMSIZ 32
 #define SYMLABSIZ 48
-#define ORGADR 32768
+#define ORGADR 0
+#define RAMSTART 0xC000
+#define RAMSIZE 0x2000
+#define STACKP 0xDFF8
 
 #define ERR_SYNTAX "syntax error"
-#define ERR_EQUALS "'=' error"
-#define ERR_BADDIR ": bad directory"
-#define ERR_COUNT ": arg count"
-#define ERR_AGAIN "try again"
 #define ERR_OPEN ": cannot open"
-#define ERR_CREATE ": cannot create"
-#define ERR_FOUND ": not found"
 #define ERR_LARGE ": too large"
 #define ERR_CHAR "Too many characters"
 #define ERR_ARGS "Too many args"
-#define ERR_BADMSG ": bad message"
-#define ERR_LNGMSG ": message too long"
 #define ERR_REDECL ": redeclared"
 #define ERR_UNDECL ": undeclared"
-
-#define DOLREPL 1
-#define DOLREPQ 2
 
 struct Keyword {
 	const char *kname;
@@ -94,26 +84,21 @@ struct Tree {
 @interface Shell: Object
 {
 @private
-	char seta[26][EXPSIZ];
 	char line[LINSIZ];
 	char *args[ARGSIZ];
-	char pidp[NUMSIZ];
 	struct Tree trebuf[TRESIZ];
 	char symnam[SYMSIZ][SYMNAMSIZ];
 	int symtyp[SYMSIZ];
 	int symlev[SYMSIZ];
 	char symlab[SYMSIZ][SYMLABSIZ];
+	int symadr[SYMSIZ];
 	int *symc;
+	int *ramc;
 	int *scope;
 	int *lblc;
 	int *orgflg;
 	int *treec;
 	int *errval;
-	int *idolp;
-	char **dolp;
-	char ***dolv;
-	int *dolc;
-	char **promp;
 	char **linep;
 	char **elinep;
 	char ***argp;
@@ -121,13 +106,6 @@ struct Tree {
 	int *peekc;
 	int *gflg;
 	int *error;
-	int *uid;
-	int *setintr;
-	char **arginp;
-	int *onelflg;
-	int *stoperr;
-	int *execflg;
-	jmp_buf *jmp;
 }
 + (int) argumentCount: (int) c argumentVector: (char **) av;
 - (void) main;
@@ -135,6 +113,7 @@ struct Tree {
 
 @interface Shell (Semantic)
 - (void) compileTree: (struct Tree *) t;
+- (void) prologue;
 - (void) compileAddress: (struct Tree *) t;
 - (int) declareName: (char *) na type: (int) t;
 - (int) lookupName: (char *) na;
@@ -142,9 +121,9 @@ struct Tree {
 
 @interface Shell (Lexer)
 - (void) word;
-- (void) setVariable: (int) i value: (char *) na;
 - (int) readCharacter;
-- (int) getCharacter: (int) flag;
+- (int) getCharacter;
+- (int) getRawCharacter;
 @end
 
 @interface Shell (Parser)
@@ -176,15 +155,8 @@ struct Tree {
 - (int) anyCharacter: (int) c in: (const char *) as;
 - (void) error: (const char *) s code: (int) exitno;
 - (char *) integerToASCII: (int) n;
-- (char *) getPIDPointer;
-- (void) setPIDPointer: (char *) ptr;
 - (int *) getTreeCount;
 - (int *) getErrorValue;
-- (int *) getCurrentDollarPointer;
-- (char **) getDollarPointer;
-- (char ***) getDollarVector;
-- (int *) getDollarCount;
-- (char **) getPrompt;
 - (char **) getLinePointer;
 - (char **) getEndLinePointer;
 - (char ***) getArgumentPointer;
@@ -192,16 +164,10 @@ struct Tree {
 - (int *) getPeekCharacter;
 - (int *) getGlobFlag;
 - (int *) getError;
-- (int *) getUserID;
-- (int *) getSetInterrupt;
-- (char **) getArgumentInput;
-- (int *) getOneLineFlag;
-- (int *) getStopError;
-- (int *) getExecuteFlag;
-- (jmp_buf *) getJumpBuffer;
 - (int *) getLabelCount;
 - (int *) getSymbolCount;
 - (int *) getScope;
+- (int *) getRamPointer;
 - (int *) getOrgFlag;
 @end
 #endif /* !SH_H */
