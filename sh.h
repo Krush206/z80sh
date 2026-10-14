@@ -39,6 +39,15 @@
 #define TBLOCK 28
 #define TINPUT 29
 #define TOUTPUT 30
+#define TNOT 31
+#define TDO 32
+#define TEND 33
+#define TTHEN 34
+#define TTO 35
+#define TDISABLE 36
+#define TENABLE 37
+#define THALT 38
+#define TBYTE 39
 #define TMUL 20
 #define TDIV 21
 #define TMOD 22
@@ -146,6 +155,11 @@ struct Tree {
 - (struct Tree *) synun: (char **) p1 end: (char **) p2;
 - (int) isOperator: (char *) w;
 - (int) srchx: (char *) cp;
+- (int) wordIs: (char *) w name: (const char *) s;
+- (int) nameOk: (char *) na;
+- (int) doDepth: (char **) p1 end: (char **) p2;
+- (char **) matchEnd: (char **) p1 end: (char **) p2;
+- (struct Tree *) doStatement: (char **) p1 end: (char **) p2;
 - (struct Tree *) tree;
 @end
 
