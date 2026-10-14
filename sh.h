@@ -60,6 +60,10 @@
 #define TLOW 49
 #define THIGH 50
 #define TDOUBLE 51
+#define TSUBSCRIPT 52
+#define TLENGTH 53
+#define TLAST 54
+#define TARRAY 55
 #define TMUL 20
 #define TDIV 21
 #define TMOD 22
@@ -113,6 +117,7 @@ struct Tree {
 	int symlev[SYMSIZ];
 	char symlab[SYMSIZ][SYMLABSIZ];
 	int symadr[SYMSIZ];
+	int symsiz[SYMSIZ];
 	int *symc;
 	int *ramc;
 	int *scope;
@@ -136,7 +141,10 @@ struct Tree {
 - (void) prologue;
 - (void) compileAddress: (struct Tree *) t;
 - (int) declareName: (char *) na type: (int) t;
+- (int) declareArray: (char *) na type: (int) t size: (int) n;
 - (int) lookupName: (char *) na;
+- (int) arraySize: (int) i;
+- (void) compileIndex: (struct Tree *) t;
 @end
 
 @interface Shell (Lexer)
@@ -182,6 +190,10 @@ struct Tree {
 - (struct Tree *) call2: (int) k args: (char **) lp end: (char **) rp;
 - (struct Tree *) callDec: (char **) lp end: (char **) rp;
 - (char **) findAssign: (char **) p1 end: (char **) p2;
+- (int) numberValue: (char *) s;
+- (struct Tree *) arrayDecl: (char **) p1 args: (char **) lp end: (char **) rp;
+- (struct Tree *) subscript: (char *) na args: (char **) lp end: (char **) rp;
+- (struct Tree *) arrayInfo: (int) k args: (char **) lp end: (char **) rp;
 - (void) stripDollar: (char *) s;
 - (struct Tree *) doStatement: (char **) p1 end: (char **) p2;
 - (struct Tree *) tree;
