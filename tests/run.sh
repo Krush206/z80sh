@@ -104,6 +104,39 @@ t_grep() {
 	pass "$name"
 }
 
+# t_order <name> <first> <second> : like t_ok, plus the
+# first pattern must match on an earlier assembly line
+# than the second (proves evaluation order).
+t_order() {
+	name=$1
+	first=$2
+	second=$3
+	cat > "$TMP/t.in"
+	if ! timeout 5 "$CSH" < "$TMP/t.in" > "$TMP/t.asm" 2> "$TMP/t.err"; then
+		fail "$name" "exit=$? stderr=[$(cat "$TMP/t.err")]"
+		return
+	fi
+	if [ -s "$TMP/t.err" ]; then
+		fail "$name" "stderr not empty: [$(cat "$TMP/t.err")]"
+		return
+	fi
+	fl=$(grep -n -m1 -E "$first" "$TMP/t.asm" | cut -d: -f1)
+	sl=$(grep -n -m1 -E "$second" "$TMP/t.asm" | cut -d: -f1)
+	if [ -z "$fl" ] || [ -z "$sl" ]; then
+		fail "$name" "missing /$first/ or /$second/"
+		return
+	fi
+	if [ "$fl" -ge "$sl" ]; then
+		fail "$name" "/$first/ (line $fl) not before /$second/ (line $sl)"
+		return
+	fi
+	if ! z80asm -o "$TMP/t.bin" "$TMP/t.asm" 2> "$TMP/t.asserr"; then
+		fail "$name" "z80asm rejected output: [$(cat "$TMP/t.asserr")]"
+		return
+	fi
+	pass "$name"
+}
+
 # t_err <name> <exit> <stderr-pattern> : stdin is the source;
 # expects the given exit code and matching stderr.
 t_err() {
@@ -320,6 +353,114 @@ Y = 6
 IF (X <> Y) THEN X = 2
 EOF
 
+t_ok plm-not-binds-below-relations <<'EOF'
+DECLARE A BYTE
+DECLARE B BYTE
+A = 5
+B = 6
+IF NOT A = B THEN A = 1 ELSE A = 2
+EOF
+
+t_ok plm-not-above-and <<'EOF'
+DECLARE A BYTE
+DECLARE B BYTE
+A = 1
+B = 0
+IF NOT A AND B THEN A = 9
+EOF
+
+t_order plm-xor-levels-and-tighter "or a" "xor b" <<'EOF'
+DECLARE R BYTE
+R = 0 AND 1 XOR 1
+EOF
+
+t_ok plm-or-xor-left-assoc <<'EOF'
+DECLARE R BYTE
+R = 1 OR 0 XOR 0
+EOF
+
+t_ok plm-assign-imbedded <<'EOF'
+DECLARE X BYTE
+DECLARE Y BYTE
+X = (Y := 5) + 1
+EOF
+
+t_grep plm-assign-imbedded-stores "ld \(y\), a" "ld \(x\), a" <<'EOF'
+DECLARE X BYTE
+DECLARE Y BYTE
+X = (Y := 5) + 1
+EOF
+
+t_ok plm-assign-imbedded-nested <<'EOF'
+DECLARE X BYTE
+DECLARE Y BYTE
+X = (Y := (X := 3))
+EOF
+
+t_ok plm-assign-imbedded-cond <<'EOF'
+DECLARE X BYTE
+DECLARE Y BYTE
+X = 0
+Y = 0
+IF (X := 1) THEN Y = 2
+EOF
+
+t_ok plm-assign-imbedded-deref <<'EOF'
+DECLARE P ADDRESS
+DECLARE V BYTE
+P = 200
+V = 1
+OUTPUT (191) = (*P := V)
+EOF
+
+t_err plm-assign-imbedded-bad-lhs 255 "syntax error" <<'EOF'
+DECLARE X BYTE
+X = (5 := 1)
+EOF
+
+t_err plm-assign-imbedded-no-rhs 255 "syntax error" <<'EOF'
+DECLARE X BYTE
+X = (X := )
+EOF
+
+t_err plm-assign-imbedded-prefix 255 "syntax error" <<'EOF'
+DECLARE X BYTE
+X = 1
+FOO (X := 2)
+EOF
+
+t_ok plm-assign-imbedded-nested <<'EOF'
+DECLARE X BYTE
+DECLARE Y BYTE
+X = (Y := (X := 3))
+EOF
+
+t_ok plm-assign-imbedded-cond <<'EOF'
+DECLARE X BYTE
+DECLARE Y BYTE
+X = 0
+Y = 0
+IF (X := 1) THEN Y = 2
+EOF
+
+t_ok plm-assign-imbedded-call-arg <<'EOF'
+DECLARE X BYTE
+X = INPUT (X := 220)
+EOF
+
+t_ok plm-assign-imbedded-deref <<'EOF'
+DECLARE P ADDRESS
+DECLARE V BYTE
+P = 200
+V = 1
+OUTPUT (191) = (*P := V)
+EOF
+
+t_err plm-assign-imbedded-undecl 255 "undeclared" <<'EOF'
+DECLARE X BYTE
+X = (Z := 5)
+EOF
+
 t_err plm-reserved-name 255 "syntax error" <<'EOF'
 DECLARE AND BYTE
 EOF
@@ -389,6 +530,72 @@ DO;
 X = 1;
 END;
 IF X = 1 THEN X = 2;
+END;
+EOF
+
+t_ok plm-do-case <<'EOF'
+DECLARE X BYTE
+X = 1
+DO CASE X;
+X = 10;
+X = 20;
+X = 30;
+END;
+EOF
+
+t_grep plm-do-case-tests-each "cp b" <<'EOF'
+DECLARE X BYTE
+X = 1
+DO CASE X;
+X = 10;
+X = 20;
+X = 30;
+END;
+EOF
+
+t_ok plm-do-case-out-of-range <<'EOF'
+DECLARE X BYTE
+X = 9
+DO CASE X;
+X = 10;
+X = 20;
+END;
+EOF
+
+t_ok plm-do-case-nested <<'EOF'
+DECLARE I BYTE
+DECLARE X BYTE
+X = 0
+DO I = 1 TO 2;
+DO CASE I;
+X = X + 10;
+X = X + 20;
+END;
+END;
+EOF
+
+t_ok plm-do-case-group-branch <<'EOF'
+DECLARE X BYTE
+X = 0
+DO CASE X;
+DO;
+X = 1;
+END;
+X = 2;
+END;
+EOF
+
+t_ok plm-do-case-empty <<'EOF'
+DECLARE X BYTE
+X = 0
+DO CASE X;
+END;
+EOF
+
+t_err plm-do-case-nosemi 255 "syntax error" <<'EOF'
+DECLARE X BYTE
+DO CASE X
+X = 1;
 END;
 EOF
 
@@ -516,6 +723,147 @@ EOF
 t_err rm-line-comment 255 "syntax error" <<'EOF'
 DECLARE X BYTE // comment
 X = 1
+EOF
+
+# --- built-in procedures ---------------------------------
+
+t_grep builtin-shl "sla a" <<'EOF'
+DECLARE X BYTE
+X = SHL(1, 3)
+EOF
+
+t_grep builtin-shr "sra a" <<'EOF'
+DECLARE X BYTE
+X = SHR(16, 2)
+EOF
+
+t_grep builtin-rol "rlca" <<'EOF'
+DECLARE X BYTE
+X = ROL(129, 1)
+EOF
+
+t_grep builtin-ror "rrca" <<'EOF'
+DECLARE X BYTE
+X = ROR(129, 1)
+EOF
+
+t_grep builtin-scl "rl c" <<'EOF'
+DECLARE X BYTE
+X = SCL(129, 1)
+EOF
+
+t_grep builtin-scr "rr c" <<'EOF'
+DECLARE X BYTE
+X = SCR(129, 1)
+EOF
+
+t_ok builtin-shift-var-count <<'EOF'
+DECLARE X BYTE
+DECLARE N BYTE
+N = 2
+X = SHL(X, N)
+EOF
+
+t_ok builtin-shift-nested <<'EOF'
+DECLARE X BYTE
+X = SHL(SHL(1, 1), 2)
+EOF
+
+t_ok builtin-shift-expr-args <<'EOF'
+DECLARE X BYTE
+X = SHL(1 + 2, 3 - 1)
+EOF
+
+t_ok builtin-time-expr <<'EOF'
+TIME(5 + 5);
+EOF
+
+t_ok builtin-dec-nested-shift <<'EOF'
+DECLARE X BYTE
+X = DEC(SHL(1, 3) + 1)
+EOF
+
+t_grep builtin-low-side-effect "in a, \(c\)" <<'EOF'
+DECLARE X BYTE
+X = LOW(INPUT(220))
+EOF
+
+t_grep builtin-time "dec c" <<'EOF'
+TIME(10);
+EOF
+
+t_grep builtin-dec "add a, b" "daa" <<'EOF'
+DECLARE X BYTE
+X = DEC(150 + 27)
+EOF
+
+t_ok builtin-dec-plus <<'EOF'
+DECLARE X BYTE
+X = DEC(150 PLUS 27)
+EOF
+
+t_ok builtin-low <<'EOF'
+DECLARE X BYTE
+DECLARE Y BYTE
+Y = 7
+X = LOW(Y)
+EOF
+
+t_grep builtin-high "ld a, 0" <<'EOF'
+DECLARE X BYTE
+DECLARE Y BYTE
+Y = 7
+X = HIGH(Y)
+EOF
+
+t_ok builtin-double <<'EOF'
+DECLARE X BYTE
+DECLARE Y BYTE
+Y = 7
+X = DOUBLE(Y)
+EOF
+
+t_err builtin-shl-one-arg 255 "syntax error" <<'EOF'
+DECLARE X BYTE
+X = SHL(1)
+EOF
+
+t_err builtin-shl-three-args 255 "syntax error" <<'EOF'
+DECLARE X BYTE
+X = SHL(1, 2, 3)
+EOF
+
+t_err builtin-shl-bare 255 "syntax error" <<'EOF'
+SHL
+EOF
+
+t_err builtin-input-two-args 255 "syntax error" <<'EOF'
+DECLARE X BYTE
+X = INPUT(1, 2)
+EOF
+
+t_err builtin-dec-no-plus 255 "syntax error" <<'EOF'
+DECLARE X BYTE
+X = DEC(150)
+EOF
+
+t_err builtin-dec-minus 255 "syntax error" <<'EOF'
+DECLARE X BYTE
+X = DEC(150 MINUS 27)
+EOF
+
+t_err builtin-dec-bare 255 "syntax error" <<'EOF'
+DEC
+EOF
+
+t_err builtin-stray-comma 255 "syntax error" <<'EOF'
+DECLARE X BYTE
+X = 1,
+EOF
+
+t_err builtin-length-blocked 255 "syntax error" <<'EOF'
+DECLARE X BYTE
+X = LENGTH(X)
 EOF
 
 # --- full image ----------------------------------------------
