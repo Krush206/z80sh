@@ -34,7 +34,6 @@
 #import "sh.h"
 
 @implementation Shell (Parser)
-
 /*
  * syntax
  *	empty
@@ -122,7 +121,7 @@
 		if(l == 0) {
 			t = [self tree];
 			t->DTYP = TAND; // Set to Async / Background token
-			if ((*p)[1] == '&')
+			if((*p)[1] == '&')
 				t->DTYP = TAND2;
 			t->DLEF = [self syn3: p1 end: p];
 			t->DRIT = [self syn2: p+1 end: p2];
@@ -162,6 +161,8 @@
 		if(l == 0) {
 			t = [self tree];
 			t->DTYP = TOR;
+			if((*p)[1] == '|')
+				t->DTYP = TOR2;
 			t->DLEF = [self syn4: p1 end: p];      // Evaluates high precedence left
 			t->DRIT = [self syn3: p+1 end: p2];    // Evaluates pipeline right
 			return(t);
@@ -196,7 +197,9 @@
 	case '=':
 		if(l == 0) {
 			t = [self tree];
-			t->DTYP = TEQU;
+			t->DTYP = TASG;
+			if((*p)[1] == '=')
+				t->DTYP = TEQU;
 			t->DLEF = [self syn5: p1 end: p];
 			t->DRIT = [self syn4: p+1 end: p2];
 			return(t);
@@ -232,6 +235,8 @@
 		if(l == 0) {
 			t = [self tree];
 			t->DTYP = TGTR;
+			if((*p)[1] == '=')
+				t->DTYP = TGEQ;
 			t->DLEF = [self syn6: p1 end: p];
 			t->DRIT = [self syn5: p+1 end: p2];
 			return(t);
@@ -267,6 +272,8 @@
 		if(l == 0) {
 			t = [self tree];
 			t->DTYP = TLSS;
+			if((*p)[1] == '=')
+				t->DTYP = TLEQ;
 			t->DLEF = [self syn7: p1 end: p];
 			t->DRIT = [self syn6: p+1 end: p2];
 			return(t);
@@ -277,93 +284,84 @@
 
 /*
  * syn7
- *	( syn1 ) [ < in  ] [ > out ]
- *	word word* [ < in ] [ > out ]
+ *	( syn1 )      <-- Routes back up to top-level expression blocks
+ *	keyword       <-- Int intercept for data declarations ("int x")
+ *	literal       <-- Number constants ("5")
+ *	variable      <-- Identifiers ("counter")
  */
 - (struct Tree *) syn7: (char **) p1 end: (char **) p2
 {
 	register char **p;
-	char **lp, **rp, *i, *o;
+	char **lp, **rp;
 	register struct Tree *t;
-	int n, l, c, flg;
+	int n, l, c;
 
-	flg = 0;
-	if(p1 != p2 && **p2 == ')')
-		flg |= FPAR;
 	lp = 0;
 	rp = 0;
-	i = 0;
-	o = 0;
 	n = 0;
 	l = 0;
-	for(p=p1; p!=p2; p++)
-	switch(c = **p) {
 
-	case '(':
-		if(l == 0) {
-			if(lp != 0)
-				(*error)++;
-			lp = p+1;
-		}
-		l++;
-		continue;
+	for(p=p1; p!=p2; p++) {
+		char *token = *p;
+		switch(c = *token) {
 
-	case ')':
-		l--;
-		if(l == 0)
-			rp = p;
-		continue;
-
-	case '>':
-		p++;
-		if(p!=p2 && **p=='>')
-			flg |= FCAT;
-		else
-			p--;
-
-	case '<':
-		if(l == 0) {
-			p++;
-			if(p == p2) {
-				(*error)++;
-				p--;
+		case '(':
+			if(l == 0) {
+				if(lp != 0) (*error)++;
+				lp = p+1;
 			}
-			if([self anyCharacter: **p in: "<>("])
-				(*error)++;
-			if(c == '<') {
-				if(i != 0)
-					(*error)++;
-				i = *p;
-				continue;
-			}
-			if(o != 0)
-				(*error)++;
-			o = *p;
-		}
-		continue;
+			l++;
+			continue;
 
-	default:
-		if(l == 0)
-			p1[n++] = *p;
+		case ')':
+			l--;
+			if(l == 0) rp = p;
+			continue;
+
+		default:
+			if(l == 0)
+				p1[n++] = token;
+		}
 	}
+
+	// Handle bracket sub-expressions: ( expression )
 	if(lp != 0) {
-		if(n != 0)
-			(*error)++;
+		if(n != 0) (*error)++;
 		t = [self tree];
 		t->DTYP = TPAR;
 		t->DSTR = (struct Tree *)[self syn1: lp end: rp];
-		goto out;
+		return(t);
 	}
-	if(n == 0)
-		(*error)++;
+
+	if(n == 0) (*error)++;
+
+	// Keyword allocation layer (e.g., "int x")
+	if (strcmp(p1[0], "int") == 0) {
+		if (n < 2) {
+			(*error)++;
+			return(0);
+		}
+		t = [self tree];
+		t->DTYP = TDECL;
+		t->DARR[0] = p1[1]; // Store variable name directly
+		return(t);
+	}
+
+	// Literal Numeric Constants (e.g., "5")
+	if (p1[0][0] >= '0' && p1[0][0] <= '9') {
+		t = [self tree];
+		t->DTYP = TNUM;
+		t->DARR[0] = p1[0];
+		return(t);
+	}
+
+	// Default fallback: Variable evaluation lookup
 	p1[n++] = 0;
 	t = [self tree];
-	t->DTYP = TCOM;
+	t->DTYP = TVAR;
 	for(l=0; l<n; l++)
 		t->DARR[l] = p1[l];
-out:
-	t->DLPT = i;
-	t->DRPT = o;
+
 	return(t);
 }
 
