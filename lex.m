@@ -33,18 +33,15 @@
 
 #import "sh.h"
 
-static char subchar = '$';
-
 @implementation Shell (Lexer)
 - (void) word
 {
 	register char c, c1;
-	register int dolflag;
 
 	*(*argp)++ = *linep;
 
 loop:
-	switch(c = [self getCharacter: DOLREPL]) {
+	switch(c = [self getCharacter]) {
 
 	case ' ':
 	case '\t':
@@ -52,12 +49,12 @@ loop:
 
 	case '\'':
 		/* 'c' : single character value, no escapes */
-		c = [self getCharacter: !DOLREPL];
-		c1 = [self getCharacter: !DOLREPL];
+		c = [self getRawCharacter];
+		c1 = [self getRawCharacter];
 		if(c1 != '\'') {
 			(*error)++;
 			while(c1 != '\'' && c1 != '\n')
-				c1 = [self getCharacter: !DOLREPL];
+				c1 = [self getRawCharacter];
 			*peekc = c1;
 			return;
 		}
@@ -71,10 +68,9 @@ loop:
 			(*linep)++;
 		goto pack;
 
-	case '"':	/* "..." : \", \$, $ substitution */
+	case '"':	/* "..." : \" quotes a quote */
 		c1 = c;
-		dolflag = (c == '"' && !*dolp) ? DOLREPQ : !DOLREPL;
-		while((c=[self getCharacter: dolflag]) != c1) {
+		while((c=[self getRawCharacter]) != c1) {
 			if(c == '\n') {
 				(*error)++;
 				*peekc = c;
@@ -82,8 +78,7 @@ loop:
 			}
 			if (c1 == '"' &&
 			    c == '\\' &&
-			    ((*peekc = [self getCharacter: !DOLREPL]) == '$' ||
-			     *peekc == '"')) {
+			    ((*peekc = [self getRawCharacter]) == '"')) {
 				c = *peekc;
 				*peekc = 0;
 			}
@@ -100,7 +95,7 @@ loop:
 	case '/':
 	case '%':
 		*(*linep)++ = c;
-		c1 = [self getCharacter: DOLREPL];
+		c1 = [self getCharacter];
 		if(c1 == c)
 			*(*linep)++ = c1;
 		else
@@ -110,7 +105,7 @@ loop:
 
 	case '!':
 		*(*linep)++ = c;
-		c1 = [self getCharacter: DOLREPL];
+		c1 = [self getCharacter];
 		if(c1 == '=')
 			*(*linep)++ = c1;
 		else
@@ -121,7 +116,7 @@ loop:
 	case '<':
 	case '>':
 		*(*linep)++ = c;
-		c1 = [self getCharacter: DOLREPL];
+		c1 = [self getCharacter];
 		if(c1 == '=')
 			*(*linep)++ = c1;
 		else
@@ -140,7 +135,7 @@ loop:
 		*(*linep)++ = '\0';
 		return;
 	case '\\':
-		if ((c=[self getCharacter: !DOLREPL])=='\n') goto loop;
+		if ((c=[self getRawCharacter])=='\n') goto loop;
 		else {
 			c |= QUOTE;
 			break;
@@ -151,8 +146,8 @@ loop:
 
 pack:
 	for(;;) {
-		if ((c = [self getCharacter: DOLREPL])=='\\') {
-			if ((c=[self getCharacter: !DOLREPL])=='\n') c = ' ';
+		if ((c = [self getCharacter])=='\\') {
+			if ((c=[self getRawCharacter])=='\n') c = ' ';
 			else c |= QUOTE;
 		}
 		if([self anyCharacter: c in: " '\"\t;&<>()|^\n:=!+-*/%{}"]) {
@@ -160,7 +155,7 @@ pack:
 			if([self anyCharacter: c in: "\"'"])
 				goto loop;
 			if(c == ':')
-				*(*linep)++ = [self getCharacter: !DOLREPL];
+				*(*linep)++ = [self getRawCharacter];
 			*(*linep)++ = '\0';
 			return;
 		}
@@ -168,41 +163,47 @@ pack:
 	}
 }
 
-- (void) setVariable: (int) i value: (char *) na
+/*	flag removed; getCharacter strips comments, getRawCharacter
+	does not, so quotes, escapes and drains read through it */
+- (int) getCharacter
 {
-	register char *st, *np;
-	char c;
+	register int c, c1;
 
-	st = seta[i];
-	np = na;
-	if(np == NULL)
-		goto null;
-	for (;;) {
-		c = *np++ & 0177;
-		*st++ = c;
-		if(c=='\n' || c=='\0') break;
+	c = [self getRawCharacter];
+	if(c != '/')
+		return(c);
+	c1 = [self getRawCharacter];
+	if(c1 == '/') {
+		while((c = [self readCharacter]) != '\n')
+			continue;
+		return(c);
 	}
-	if(c=='\n') st++;
-null:
-	*st = '\0';
+	if(c1 != '*') {
+		*peekc = c1;
+		return('/');
+	}
+star:
+	while((c = [self readCharacter]) != '*')
+		continue;
+	if((c = [self readCharacter]) != '/') {
+		*peekc = c;
+		goto star;
+	}
+	return([self getRawCharacter]);
 }
 
-/*	flag: !DOLREPL ==> no substitution, DOLREPL ==> substitute,
-	DOLREPQ ==> quoted substitution: "$1" = value of $1 for sure */
-- (int) getCharacter: (int) flag
+- (int) getRawCharacter
 {
-	register char c, c1;
+	register char c;
 
 	if(*peekc) {
 		c = *peekc;
 		*peekc = 0;
-		if(c == '/' && flag == DOLREPL)
-			goto slash;
 		return(c);
 	}
 	if(*argp > *eargp) {
 		*argp -= 10;
-		while((c=[self getCharacter: !DOLREPL]) != '\n');
+		while((c=[self getRawCharacter]) != '\n');
 		*argp += 10;
 		[self error: ERR_ARGS code: 255];
 		(*gflg)++;
@@ -210,72 +211,13 @@ null:
 	}
 	if(*linep > *elinep) {
 		*linep -= 10;
-		while((c=[self getCharacter: !DOLREPL]) != '\n');
+		while((c=[self getRawCharacter]) != '\n');
 		*linep += 10;
 		[self error: ERR_CHAR code: 255];
 		(*gflg)++;
 		return(c);
 	}
-getd:
-	if(*dolp) {
-		if ((c = *(*dolp)++)) {
-			if (flag == DOLREPQ)
-				c |= QUOTE;
-			return c;
-		}
-		if (*idolp && ++(*idolp) < *dolc) {
-			*dolp = (*dolv)[*idolp];
-			return(' ');
-		}
-		*dolp = 0;
-	}
 	c = [self readCharacter];
-slash:
-	if(c == '/' && flag == DOLREPL) {
-		/* comments live only outside quotes and expansion */
-		if((c1 = [self readCharacter]) == '/') {
-			while((c = [self readCharacter]) != '\n')
-				continue;
-		}
-		else if(c1 == '*') {
-		star:
-			while((c = [self readCharacter]) != '*')
-				continue;
-			if((c = [self readCharacter]) != '/') {
-				*peekc = c;
-				goto star;
-			}
-			goto getd;
-		}
-		else
-			*peekc = c1;
-	}
-	if(c == subchar && flag) {
-		c = [self readCharacter];
-		if(c>='0' && c<='9') {
-			if(c-'0' < *dolc)
-				*dolp = (*dolv)[c-'0'];
-			goto getd;
-		}
-		else if(c>='a' && c<='z') {
-			*dolp = seta[c-'a'];
-			goto getd;
-		}
-		else if(c == '$') {
-			*dolp = pidp;
-			goto getd;
-		}
-		/* $* = $1 $2 .... */
-		else if (c == '*') {
-			if (*dolc > 1) {
-				*idolp = 1;
-				*dolp = (*dolv)[1];
-			}
-			goto getd;
-		}
-		else
-			if(c != '\n')  c = [self readCharacter];
-	}
 	return(c&0177);
 }
 
@@ -283,35 +225,20 @@ slash:
 {
 	int rdstat;
 	char cc;
-	register int c;
 
-	if (*arginp) {
-		if (**arginp == 1) {
-			if([self braceDepth: args end: *argp] > 0)
-				[self error: ERR_SYNTAX code: 255];
-			printf("\thalt\n");
-			exit(*errval);
-		}
-		if ((c = *(*arginp)++) == 0) {
-			**arginp = 1;
-			c = '\n';
-		}
-		return(c);
-	}
-	if (*onelflg==1)
-		exit(255);
 	if((rdstat = read(0, &cc, 1)) != 1) {
 		if(rdstat==0) {
 			/* end of file ends the program */
 			if([self braceDepth: args end: *argp] > 0)
 				[self error: ERR_SYNTAX code: 255];
 			printf("\thalt\n");
+			printf("\tseek 0x7ff0\n");
+			/* name has two trailing spaces; checksum stays 0 */
+			printf("\tdefb \"TMR SEGA  \",0,0,0,0,0,0x4c\n");
 			exit(*errval);
 		}
 		else exit(255); /* error */
 	}
-	if (cc=='\n' && *onelflg)
-		(*onelflg)--;
 	return(cc);
 }
 @end
