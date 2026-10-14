@@ -66,10 +66,8 @@
 {
 	[self printString: s];
 	[self printString: "\n"];
-	if(*promp == NULL) {
-		lseek(0, (off_t) 0, SEEK_END);
-		exit(exitno);
-	}
+	lseek(0, (off_t) 0, SEEK_END);
+	exit(exitno);
 }
 
 - (char *) integerToASCII: (int) n
@@ -90,16 +88,6 @@
 	return NULL;
 }
 
-- (char *) getPIDPointer
-{
-	return pidp;
-}
-
-- (void) setPIDPointer: (char *) ptr
-{
-	(void) memcpy(pidp, ptr, sizeof pidp);
-}
-
 - (int *) getTreeCount
 {
 	static int ret;
@@ -112,41 +100,6 @@
 	static int ret;
 
 	return errval = &ret;
-}
-
-- (int *) getCurrentDollarPointer
-{
-	static int ret;
-
-	return idolp = &ret;
-}
-
-- (char **) getDollarPointer
-{
-	static char *ret;
-
-	return dolp = &ret;
-}
-
-- (char ***) getDollarVector
-{
-	static char **ret;
-
-	return dolv = &ret;
-}
-
-- (int *) getDollarCount
-{
-	static int ret;
-
-	return dolc = &ret;
-}
-
-- (char **) getPrompt
-{
-	static char *ret;
-
-	return promp = &ret;
 }
 
 - (char **) getLinePointer
@@ -198,55 +151,6 @@
 	return error = &ret;
 }
 
-- (int *) getUserID
-{
-	static int ret;
-
-	return uid = &ret;
-}
-
-- (int *) getSetInterrupt
-{
-	static int ret;
-
-	return setintr = &ret;
-}
-
-- (char **) getArgumentInput
-{
-	static char *ret;
-
-	return arginp = &ret;
-}
-
-- (int *) getOneLineFlag
-{
-	static int ret;
-
-	return onelflg = &ret;
-}
-
-- (int *) getStopError
-{
-	static int ret;
-
-	return stoperr = &ret;
-}
-
-- (int *) getExecuteFlag
-{
-	static int ret;
-
-	return execflg = &ret;
-}
-
-- (jmp_buf *) getJumpBuffer
-{
-	static jmp_buf ret;
-
-	return jmp = &ret;
-}
-
 - (int *) getLabelCount
 {
 	static int ret;
@@ -266,6 +170,13 @@
 	static int ret;
 
 	return scope = &ret;
+}
+
+- (int *) getRamPointer
+{
+	static int ret = RAMSTART;
+
+	return ramc = &ret;
 }
 
 - (int *) getOrgFlag
