@@ -43,7 +43,9 @@ static struct Keyword keyw[] = {
 	{ "address", TADDR },
 	{ "else", TELSE },
 	{ "if", TIF },
+	{ "input", TINPUT },
 	{ "int", TDECL },
+	{ "output", TOUTPUT },
 	{ "while", TWHILE }
 };
 
@@ -977,6 +979,15 @@ static struct Keyword keyw[] = {
 			p1[n++] = *p;
 	}
 	if(lp != 0) {
+		if(n == 1) {
+			k = [self srchx: p1[0]];
+			if(k == TINPUT || k == TOUTPUT) {
+				t = [self tree];
+				t->DTYP = k;
+				t->DLEF = [self syn2: lp end: rp];
+				return(t);
+			}
+		}
 		if(n != 0)
 			(*error)++;
 		t = [self tree];
@@ -1033,9 +1044,8 @@ static struct Keyword keyw[] = {
 - (struct Tree *) tree
 {
 	if(*treec == TRESIZ) {
-		[self printString: "Command line overflow\n"];
-		(*error)++;
-		longjmp(*jmp, 1);
+		[self error: "Command line overflow" code: 255];
+		exit(255);
 	}
 	return(&trebuf[(*treec)++]);
 }
