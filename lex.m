@@ -102,9 +102,20 @@ loop:
 		*(*linep)++ = '\0';
 		return;
 
+	case ':':
+		*(*linep)++ = c;
+		c1 = [self getCharacter];
+		if(c1 == '=')
+			*(*linep)++ = c1;
+		else
+			*peekc = c1;
+		*(*linep)++ = '\0';
+		return;
+
 	case ';':
 	case '(':
 	case ')':
+	case ',':
 	case '^':
 	case '\n':
 		*(*linep)++ = c;
@@ -126,15 +137,13 @@ pack:
 			if ((c=[self getRawCharacter])=='\n') c = ' ';
 			else c |= QUOTE;
 		}
-		if(![self anyCharacter: c in: " '\"\t;&<>()|^\n:=!+-*/%"]) {
+		if(![self anyCharacter: c in: " '\"\t;&<>()|^\n:=!+-*/%,"]) {
 			*(*linep)++ = c;
 			continue;
 		}
 		*peekc = c;
 		if([self anyCharacter: c in: "\"'"])
 			goto loop;
-		if(c == ':')
-			*(*linep)++ = [self getRawCharacter];
 		*(*linep)++ = '\0';
 		return;
 	}
