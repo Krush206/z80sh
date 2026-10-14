@@ -46,7 +46,9 @@ static struct Keyword keyw[] = {
 	{ "address", TADDR },
 	{ "and", TAND2 },
 	{ "byte", TBYTE },
+	{ "call", TCALL },
 	{ "case", TCASE },
+	{ "data", TDATA },
 	{ "dec", TDEC },
 	{ "declare", TDECL },
 	{ "disable", TDISABLE },
@@ -55,12 +57,18 @@ static struct Keyword keyw[] = {
 	{ "else", TELSE },
 	{ "enable", TENABLE },
 	{ "end", TEND },
+	{ "go", TGO },
+	{ "goto", TGOTO },
 	{ "halt", THALT },
 	{ "high", THIGH },
 	{ "if", TIF },
+	{ "initial", TINITIAL },
 	{ "input", TINPUT },
+	{ "interrupt", TINTERRUPT },
+	{ "label", TLABEL },
 	{ "last", TLAST },
 	{ "length", TLENGTH },
+	{ "literally", TLITERAL },
 	{ "low", TLOW },
 	{ "minus", TSUB },
 	{ "mod", TMOD },
@@ -68,6 +76,8 @@ static struct Keyword keyw[] = {
 	{ "or", TOR2 },
 	{ "output", TOUTPUT },
 	{ "plus", TADD },
+	{ "procedure", TPROCEDURE },
+	{ "return", TRETURN },
 	{ "rol", TROL },
 	{ "ror", TROR },
 	{ "scl", TSCL },
@@ -1577,6 +1587,80 @@ static struct Keyword keyw[] = {
 }
 
 /*
+ * groupDecl
+ *	DECLARE (a, b, ...) type as chained declaration
+ *	nodes; every item must be one plain name
+ */
+- (struct Tree *) groupDecl: (char **) p1 args: (char **) lp end: (char **) rp
+{
+	struct Tree *t, *rest, *d;
+	char *names[ARGSIZ];
+	char **q, **seg;
+	int k, l, type;
+
+	type = TDECL;
+	if([self wordIs: p1[1] name: "address"])
+		type = TADDR;
+	else if(![self wordIs: p1[1] name: "byte"]) {
+		[self error: ERR_SYNTAX code: 255];
+		return(0);
+	}
+	k = 0;
+	seg = lp;
+	l = 0;
+	for(q = lp; q != rp; q++) {
+		if(strcmp(*q, "(") == 0) {
+			l++;
+			continue;
+		}
+		if(strcmp(*q, ")") == 0) {
+			l--;
+			continue;
+		}
+		if(l != 0 || strcmp(*q, ",") != 0)
+			continue;
+		if(q == seg || q != seg+1 ||
+		    [self srchx: *seg] != -1 || ![self nameOk: *seg]) {
+			[self error: ERR_SYNTAX code: 255];
+			return(0);
+		}
+		if(k == ARGSIZ) {
+			[self error: ERR_LARGE code: 255];
+			return(0);
+		}
+		names[k++] = *seg;
+		seg = q+1;
+	}
+	if(seg == rp || rp != seg+1 ||
+	    [self srchx: *seg] != -1 || ![self nameOk: *seg]) {
+		[self error: ERR_SYNTAX code: 255];
+		return(0);
+	}
+	if(k == ARGSIZ) {
+		[self error: ERR_LARGE code: 255];
+		return(0);
+	}
+	names[k++] = *seg;
+	t = 0;
+	while(k > 0) {
+		k--;
+		d = [self tree];
+		d->DTYP = type;
+		d->DARR[0] = names[k];
+		if(t == 0)
+			t = d;
+		else {
+			rest = [self tree];
+			rest->DTYP = TLST;
+			rest->DLEF = d;
+			rest->DRIT = t;
+			t = rest;
+		}
+	}
+	return(t);
+}
+
+/*
  * arrayDecl
  *	DECLARE name (size) BYTE as a TARRAY node; ADDRESS
  *	arrays need 16-bit values and stay an error
@@ -1658,6 +1742,7 @@ static struct Keyword keyw[] = {
 	register char **p;
 	char **lp, **rp;
 	register struct Tree *t;
+	char *w[ARGSIZ];
 	int n, l, k;
 
 	lp = 0;
@@ -1683,11 +1768,11 @@ static struct Keyword keyw[] = {
 
 	default:
 		if(l == 0 && **p != '\n')
-			p1[n++] = *p;
+			w[n++] = *p;
 	}
 	if(lp != 0) {
 		if(n == 1)
-			k = [self srchx: p1[0]];
+			k = [self srchx: w[0]];
 		else
 			k = -1;
 		if(k == TINPUT || k == TOUTPUT || k == TLOW ||
@@ -1701,9 +1786,11 @@ static struct Keyword keyw[] = {
 		if(n == 1 && (k == TLENGTH || k == TLAST))
 			return [self arrayInfo: k args: lp end: rp];
 		if(n == 1 && k == -1)
-			return [self subscript: p1[0] args: lp end: rp];
-		if(n == 3 && [self srchx: p1[0]] == TDECL)
-			return [self arrayDecl: p1 args: lp end: rp];
+			return [self subscript: w[0] args: lp end: rp];
+		if(n == 3 && [self srchx: w[0]] == TDECL)
+			return [self arrayDecl: w args: lp end: rp];
+		if(n == 2 && [self srchx: w[0]] == TDECL)
+			return [self groupDecl: w args: lp end: rp];
 		if(n != 0)
 			[self error: ERR_SYNTAX code: 255];
 		t = [self tree];
@@ -1715,7 +1802,7 @@ static struct Keyword keyw[] = {
 		[self error: ERR_SYNTAX code: 255];
 		return(0);
 	}
-	switch(k = [self srchx: p1[0]]) {
+	switch(k = [self srchx: w[0]]) {
 
 	case TDECL:
 		/* DECLARE name BYTE, DECLARE name ADDRESS */
@@ -1723,20 +1810,20 @@ static struct Keyword keyw[] = {
 			[self error: ERR_SYNTAX code: 255];
 			return(0);
 		}
-		if([self srchx: p1[1]] != -1 || ![self nameOk: p1[1]]) {
+		if([self srchx: w[1]] != -1 || ![self nameOk: w[1]]) {
 			[self error: ERR_SYNTAX code: 255];
 			return(0);
 		}
 		t = [self tree];
-		if([self wordIs: p1[2] name: "byte"])
+		if([self wordIs: w[2] name: "byte"])
 			t->DTYP = TDECL;
-		else if([self wordIs: p1[2] name: "address"])
+		else if([self wordIs: w[2] name: "address"])
 			t->DTYP = TADDR;
 		else {
 			[self error: ERR_SYNTAX code: 255];
 			return(0);
 		}
-		t->DARR[0] = p1[1];
+		t->DARR[0] = w[1];
 		return(t);
 
 	case TADDR:
@@ -1783,23 +1870,33 @@ static struct Keyword keyw[] = {
 	case TDOUBLE:
 	case TLENGTH:
 	case TLAST:
+	case TGOTO:
+	case TGO:
+	case TLABEL:
+	case TCALL:
+	case TPROCEDURE:
+	case TRETURN:
+	case TDATA:
+	case TINITIAL:
+	case TLITERAL:
+	case TINTERRUPT:
 		[self error: ERR_SYNTAX code: 255];
 		return(0);
 	}
-	if((p1[0][0] >= '0' && p1[0][0] <= '9') ||
-	    (p1[0][0] == '-' && p1[0][1] >= '0' && p1[0][1] <= '9')) {
+	if((w[0][0] >= '0' && w[0][0] <= '9') ||
+	    (w[0][0] == '-' && w[0][1] >= '0' && w[0][1] <= '9')) {
 		if(n != 1) {
 			[self error: ERR_SYNTAX code: 255];
 			return(0);
 		}
 		/* $ signs read for show in numbers are dropped */
-		[self stripDollar: p1[0]];
+		[self stripDollar: w[0]];
 		t = [self tree];
 		t->DTYP = TNUM;
-		t->DARR[0] = p1[0];
+		t->DARR[0] = w[0];
 		return(t);
 	}
-	if([self anyCharacter: p1[0][0] in: ",=|&^<>!+-*/%~{}:"]) {
+	if([self anyCharacter: w[0][0] in: ",=|&^<>!+-*/%~{}:"]) {
 		[self error: ERR_SYNTAX code: 255];
 		return(0);
 	}
@@ -1810,7 +1907,7 @@ static struct Keyword keyw[] = {
 	t = [self tree];
 	t->DTYP = TVAR;
 	for(l=0; l<n; l++)
-		t->DARR[l] = p1[l];
+		t->DARR[l] = w[l];
 	return(t);
 }
 
