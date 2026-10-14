@@ -117,7 +117,7 @@ loop:
 	case '>':
 		*(*linep)++ = c;
 		c1 = [self getCharacter];
-		if(c1 == '=')
+		if(c1 == '=' || (c == '<' && c1 == '>'))
 			*(*linep)++ = c1;
 		else
 			*peekc = c1;
@@ -229,7 +229,8 @@ star:
 	if((rdstat = read(0, &cc, 1)) != 1) {
 		if(rdstat==0) {
 			/* end of file ends the program */
-			if([self braceDepth: args end: *argp] > 0)
+			if([self braceDepth: args end: *argp] > 0 ||
+			    [self doDepth: args end: *argp] > 0)
 				[self error: ERR_SYNTAX code: 255];
 			printf("\thalt\n");
 			printf("\tseek 0x7ff0\n");
