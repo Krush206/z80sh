@@ -41,6 +41,7 @@
     if(*orgflg == 0) {
         printf("\torg %d\n", ORGADR);
         (*orgflg)++;
+        [self prologue];
     }
 
     switch(t->DTYP) {
@@ -57,8 +58,7 @@
             if(i < 0) {
                 [self printString: t->DARR[0]];
                 [self error: ERR_UNDECL code: 255];
-                (*error)++;
-                longjmp(*jmp, 1);
+                exit(255);
             }
             // Load 8-bit variable value into accumulator
             printf("\tld a, (%s)\n", symlab[i]);
@@ -89,18 +89,18 @@
         case TDECL: {
             register int i;
 
-            /* Reserve one byte of space for the declared variable */
+            /* Name a byte of RAM for the declared variable */
             i = [self declareName: t->DARR[0] type: TDECL];
-            printf("%s:\tdefs 1\n", symlab[i]);
+            printf("%s:\tequ 0x%X\n", symlab[i], symadr[i]);
             break;
         }
 
         case TADDR: {
             register int i;
 
-            /* Reserve two bytes of space for the declared address */
+            /* Name two bytes of RAM for the declared address */
             i = [self declareName: t->DARR[0] type: TADDR];
-            printf("%s:\tdefs 2\n", symlab[i]);
+            printf("%s:\tequ 0x%X\n", symlab[i], symadr[i]);
             break;
         }
 
@@ -117,10 +117,22 @@
                 printf("\tld (hl), a\n");
                 break;
             }
+            if(lt == TOUTPUT) {
+                /* PL/M OUTPUT(port) = value; the port is the
+                   operand of the TOUTPUT node on the left */
+                [self compileTree: t->DRIT];
+                printf("\tpush af\n");
+                [self compileTree: t->DLEF->DLEF];
+                printf("\tld c, a\n");
+                printf("\tld b, c\n");
+                printf("\tpop af\n");
+                printf("\tout (c), a\n");
+                printf("\tnop\n");
+                break;
+            }
             if(lt != TVAR && lt != TDECL && lt != TADDR) {
                 [self error: ERR_SYNTAX code: 255];
-                (*error)++;
-                longjmp(*jmp, 1);
+                exit(255);
             }
             if(lt == TDECL || lt == TADDR) {
                 /* A declaration on the left reserves its space first */
@@ -130,8 +142,7 @@
             if(i < 0) {
                 [self printString: t->DLEF->DARR[0]];
                 [self error: ERR_UNDECL code: 255];
-                (*error)++;
-                longjmp(*jmp, 1);
+                exit(255);
             }
             // Evaluate expression value on the right branch
             [self compileTree: t->DRIT];
@@ -454,15 +465,32 @@
             printf("\tld a, (hl)\n");
             break;
 
+        case TINPUT:
+            /* PL/M INPUT(port): byte value from the port */
+            [self compileTree: t->DLEF];
+            printf("\tld c, a\n");
+            printf("\tld b, c\n");
+            printf("\tin a, (c)\n");
+            printf("\tnop\n");
+            break;
+
+        case TOUTPUT:
+            /* write-only; OUTPUT(port) needs = value */
+            [self error: ERR_SYNTAX code: 255];
+            exit(255);
+            break;
+
         case TBLOCK: {
-            register int n, lv;
+            register int n, lv, ra;
 
             /* block scope: locals vanish at the closing } */
             lv = *scope;
             n = *symc;
+            ra = *ramc;
             (*scope)++;
             [self compileTree: t->DLEF];
             *symc = n;
+            *ramc = ra;
             *scope = lv;
             break;
         }
@@ -471,6 +499,33 @@
             fprintf(stderr, "Unknown AST node type: %d\n", t->DTYP);
             break;
     }
+}
+
+- (void) prologue
+{
+	/* vectors, boot and silence, after the reference manual */
+	printf("\tjp start\n");
+	printf("\tdefs 0x35\n");
+	printf("\tret\n");
+	printf("\tdefs 0x2D\n");
+	printf("\tretn\n");
+	printf("start:\n");
+	printf("\tdi\n");
+	printf("\tim 1\n");
+	printf("\tld sp, 0x%X\n", STACKP);
+	printf("\tld hl, 0x%X\n", RAMSTART);
+	printf("\tld de, 0x%X\n", RAMSTART + 1);
+	printf("\tld bc, 0x%X\n", RAMSIZE - 1);
+	printf("\tld (hl), 0\n");
+	printf("\tldir\n");
+	printf("\tld a, 0x9F\n");
+	printf("\tout (0x7F), a\n");
+	printf("\tld a, 0xBF\n");
+	printf("\tout (0x7F), a\n");
+	printf("\tld a, 0xDF\n");
+	printf("\tout (0x7F), a\n");
+	printf("\tld a, 0xFF\n");
+	printf("\tout (0x7F), a\n");
 }
 
 - (void) compileAddress: (struct Tree *) t
@@ -484,33 +539,38 @@
 - (int) declareName: (char *) na type: (int) t
 {
 	register char *s, *d;
-	register int i;
+	register int i, size;
 
 	for(i = *symc - 1; i >= 0 && symlev[i] == *scope; i--)
 		if(strcmp(symnam[i], na) == 0) {
 			[self printString: na];
 			[self error: ERR_REDECL code: 255];
-			(*error)++;
-			longjmp(*jmp, 1);
+			exit(255);
 		}
 	if(*symc == SYMSIZ) {
 		[self error: ERR_LARGE code: 255];
-		(*error)++;
-		longjmp(*jmp, 1);
+		exit(255);
 	}
 	s = na;
 	d = symnam[*symc];
 	while(*s) {
 		if(d >= symnam[*symc] + SYMNAMSIZ - 1) {
 			[self error: ERR_LARGE code: 255];
-			(*error)++;
-			longjmp(*jmp, 1);
+			exit(255);
 		}
 		*d++ = *s++;
 	}
 	*d = '\0';
 	symtyp[*symc] = t;
 	symlev[*symc] = *scope;
+	size = (t == TADDR) ? 2 : 1;
+	if(*ramc + size > STACKP) {
+		/* keep clear of the stack base and the reserved top eight */
+		[self error: ERR_LARGE code: 255];
+		exit(255);
+	}
+	symadr[*symc] = *ramc;
+	*ramc += size;
 	if(*scope == 0)
 		(void) strcpy(symlab[*symc], na);
 	else {
