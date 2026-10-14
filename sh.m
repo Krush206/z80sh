@@ -91,7 +91,8 @@ loop:
 	do {
 		cp = *linep;
 		[self word];
-	} while(*cp != '\n' || [self braceDepth: args end: *argp] > 0);
+	} while(*cp != '\n' || [self braceDepth: args end: *argp] > 0 ||
+	    [self doDepth: args end: *argp] > 0);
 	*treec = 0;
 	if(*gflg == 0) {
 		if(*error == 0)
