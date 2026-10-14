@@ -50,16 +50,20 @@
             printf("\tld a, %s\n", t->DARR[0]);
             break;
 
-        case TVAR:
-            if([self lookupName: t->DARR[0]] < 0) {
+        case TVAR: {
+            register int i;
+
+            i = [self lookupName: t->DARR[0]];
+            if(i < 0) {
                 [self printString: t->DARR[0]];
                 [self error: ERR_UNDECL code: 255];
                 (*error)++;
                 longjmp(*jmp, 1);
             }
             // Load 8-bit variable value into accumulator
-            printf("\tld a, (%s)\n", t->DARR[0]);
+            printf("\tld a, (%s)\n", symlab[i]);
             break;
+        }
 
         case TADD:
             // 1. Evaluate Right branch
@@ -82,21 +86,26 @@
             printf("\tsub b\n");  // A = A - B
             break;
 
-        case TDECL:
-            /* Reserve one byte of space for the declared variable */
-            [self declareName: t->DARR[0] type: TDECL];
-            printf("%s:\tdefs 1\n", t->DARR[0]);
-            break;
+        case TDECL: {
+            register int i;
 
-        case TADDR:
-            /* Reserve two bytes of space for the declared address */
-            [self declareName: t->DARR[0] type: TADDR];
-            printf("%s:\tdefs 2\n", t->DARR[0]);
+            /* Reserve one byte of space for the declared variable */
+            i = [self declareName: t->DARR[0] type: TDECL];
+            printf("%s:\tdefs 1\n", symlab[i]);
             break;
+        }
+
+        case TADDR: {
+            register int i;
+
+            /* Reserve two bytes of space for the declared address */
+            i = [self declareName: t->DARR[0] type: TADDR];
+            printf("%s:\tdefs 2\n", symlab[i]);
+            break;
+        }
 
         case TASG: {
-            register char *na;
-            register int lt;
+            register int i, lt;
 
             lt = t->DLEF->DTYP;
             if(lt == TDEREF) {
@@ -113,13 +122,13 @@
                 (*error)++;
                 longjmp(*jmp, 1);
             }
-            na = t->DLEF->DARR[0];
             if(lt == TDECL || lt == TADDR) {
                 /* A declaration on the left reserves its space first */
                 [self compileTree: t->DLEF];
             }
-            else if([self lookupName: na] < 0) {
-                [self printString: na];
+            i = [self lookupName: t->DLEF->DARR[0]];
+            if(i < 0) {
+                [self printString: t->DLEF->DARR[0]];
                 [self error: ERR_UNDECL code: 255];
                 (*error)++;
                 longjmp(*jmp, 1);
@@ -127,11 +136,11 @@
             // Evaluate expression value on the right branch
             [self compileTree: t->DRIT];
             // Store the accumulator value into the variable on the left
-            printf("\tld (%s), a\n", na);
+            printf("\tld (%s), a\n", symlab[i]);
             if(lt == TADDR) {
                 /* addresses hold two bytes; the high one is zero */
                 printf("\txor a\n");
-                printf("\tld (%s+1), a\n", na);
+                printf("\tld (%s+1), a\n", symlab[i]);
             }
             break;
         }
@@ -445,6 +454,19 @@
             printf("\tld a, (hl)\n");
             break;
 
+        case TBLOCK: {
+            register int n, lv;
+
+            /* block scope: locals vanish at the closing } */
+            lv = *scope;
+            n = *symc;
+            (*scope)++;
+            [self compileTree: t->DLEF];
+            *symc = n;
+            *scope = lv;
+            break;
+        }
+
         default:
             fprintf(stderr, "Unknown AST node type: %d\n", t->DTYP);
             break;
@@ -459,16 +481,18 @@
 	printf("\tld h, 0\n");
 }
 
-- (void) declareName: (char *) na type: (int) t
+- (int) declareName: (char *) na type: (int) t
 {
 	register char *s, *d;
+	register int i;
 
-	if([self lookupName: na] >= 0) {
-		[self printString: na];
-		[self error: ERR_REDECL code: 255];
-		(*error)++;
-		longjmp(*jmp, 1);
-	}
+	for(i = *symc - 1; i >= 0 && symlev[i] == *scope; i--)
+		if(strcmp(symnam[i], na) == 0) {
+			[self printString: na];
+			[self error: ERR_REDECL code: 255];
+			(*error)++;
+			longjmp(*jmp, 1);
+		}
 	if(*symc == SYMSIZ) {
 		[self error: ERR_LARGE code: 255];
 		(*error)++;
@@ -486,16 +510,24 @@
 	}
 	*d = '\0';
 	symtyp[*symc] = t;
-	(*symc)++;
+	symlev[*symc] = *scope;
+	if(*scope == 0)
+		(void) strcpy(symlab[*symc], na);
+	else {
+		(void) strcpy(symlab[*symc], na);
+		(void) strcat(symlab[*symc], "_");
+		(void) strcat(symlab[*symc], [self integerToASCII: (*lblc)++]);
+	}
+	return((*symc)++);
 }
 
 - (int) lookupName: (char *) na
 {
 	register int i;
 
-	for(i=0; i<*symc; i++)
+	for(i = *symc - 1; i >= 0; i--)
 		if(strcmp(symnam[i], na) == 0)
-			return(symtyp[i]);
+			return(i);
 	return(-1);
 }
 @end
