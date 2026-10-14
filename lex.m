@@ -51,39 +51,17 @@ loop:
 		/* 'c' : single character value, no escapes */
 		c = [self getRawCharacter];
 		c1 = [self getRawCharacter];
-		if(c1 != '\'') {
-			(*error)++;
-			while(c1 != '\'' && c1 != '\n')
-				c1 = [self getRawCharacter];
-			*peekc = c1;
-			return;
-		}
-		if(*linep + 4 > *elinep) {
+		if(c1 != '\'')
+			[self error: ERR_SYNTAX code: 255];
+		if(*linep + 4 > *elinep)
 			[self error: ERR_CHAR code: 255];
-			(*gflg)++;
-			return;
-		}
 		(void) strcpy(*linep, [self integerToASCII: c&0177]);
 		while(**linep)
 			(*linep)++;
 		goto pack;
 
 	case '"':	/* "..." : \" quotes a quote */
-		c1 = c;
-		while((c=[self getRawCharacter]) != c1) {
-			if(c == '\n') {
-				(*error)++;
-				*peekc = c;
-				return;
-			}
-			if (c1 == '"' &&
-			    c == '\\' &&
-			    ((*peekc = [self getRawCharacter]) == '"')) {
-				c = *peekc;
-				*peekc = 0;
-			}
-			*(*linep)++ = c|QUOTE;
-		}
+		[self readQuoted: c];
 		goto pack;
 
 	case '&':
@@ -127,8 +105,6 @@ loop:
 	case ';':
 	case '(':
 	case ')':
-	case '{':
-	case '}':
 	case '^':
 	case '\n':
 		*(*linep)++ = c;
@@ -150,20 +126,60 @@ pack:
 			if ((c=[self getRawCharacter])=='\n') c = ' ';
 			else c |= QUOTE;
 		}
-		if([self anyCharacter: c in: " '\"\t;&<>()|^\n:=!+-*/%{}"]) {
-			*peekc = c;
-			if([self anyCharacter: c in: "\"'"])
-				goto loop;
-			if(c == ':')
-				*(*linep)++ = [self getRawCharacter];
-			*(*linep)++ = '\0';
-			return;
+		if(![self anyCharacter: c in: " '\"\t;&<>()|^\n:=!+-*/%"]) {
+			*(*linep)++ = c;
+			continue;
 		}
-		*(*linep)++ = c;
+		*peekc = c;
+		if([self anyCharacter: c in: "\"'"])
+			goto loop;
+		if(c == ':')
+			*(*linep)++ = [self getRawCharacter];
+		*(*linep)++ = '\0';
+		return;
 	}
 }
 
-/*	flag removed; getCharacter strips comments, getRawCharacter
+/*
+ * readQuoted
+ *	a "..." string into the word buffer; every character
+ *	keeps a QUOTE bit so later stages never mistake it
+ *	for syntax; a newline inside is an error
+ */
+- (void) readQuoted: (int) q
+{
+	int c;
+
+	c = q;
+	while((c = [self getRawCharacter]) != q) {
+		if(c == '\n')
+			[self error: ERR_SYNTAX code: 255];
+		if(q == '"' && c == '\\' &&
+		    ((*peekc = [self getRawCharacter]) == '"')) {
+			c = *peekc;
+			*peekc = 0;
+		}
+		*(*linep)++ = c|QUOTE;
+	}
+}
+
+/*
+ * endOfFile
+ *	end the program: an open DO..END group is a syntax
+ *	error, else emit the halt and the ROM header
+ */
+- (void) endOfFile
+{
+	if([self doDepth: args end: *argp] > 0)
+		[self error: ERR_SYNTAX code: 255];
+	printf("\thalt\n");
+	printf("\tseek 0x7ff0\n");
+	/* name has two trailing spaces; checksum stays 0 */
+	printf("\tdefb \"TMR SEGA  \",0,0,0,0,0,0x4c\n");
+	exit(*errval);
+}
+
+/*	getCharacter strips star-slash comments, getRawCharacter
 	does not, so quotes, escapes and drains read through it */
 - (int) getCharacter
 {
@@ -173,11 +189,6 @@ pack:
 	if(c != '/')
 		return(c);
 	c1 = [self getRawCharacter];
-	if(c1 == '/') {
-		while((c = [self readCharacter]) != '\n')
-			continue;
-		return(c);
-	}
 	if(c1 != '*') {
 		*peekc = c1;
 		return('/');
@@ -206,16 +217,12 @@ star:
 		while((c=[self getRawCharacter]) != '\n');
 		*argp += 10;
 		[self error: ERR_ARGS code: 255];
-		(*gflg)++;
-		return(c);
 	}
 	if(*linep > *elinep) {
 		*linep -= 10;
 		while((c=[self getRawCharacter]) != '\n');
 		*linep += 10;
 		[self error: ERR_CHAR code: 255];
-		(*gflg)++;
-		return(c);
 	}
 	c = [self readCharacter];
 	return(c&0177);
@@ -227,17 +234,8 @@ star:
 	char cc;
 
 	if((rdstat = read(0, &cc, 1)) != 1) {
-		if(rdstat==0) {
-			/* end of file ends the program */
-			if([self braceDepth: args end: *argp] > 0 ||
-			    [self doDepth: args end: *argp] > 0)
-				[self error: ERR_SYNTAX code: 255];
-			printf("\thalt\n");
-			printf("\tseek 0x7ff0\n");
-			/* name has two trailing spaces; checksum stays 0 */
-			printf("\tdefb \"TMR SEGA  \",0,0,0,0,0,0x4c\n");
-			exit(*errval);
-		}
+		if(rdstat==0)
+			[self endOfFile];
 		else exit(255); /* error */
 	}
 	return(cc);
