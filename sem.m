@@ -70,6 +70,30 @@ static int nameEqual(const char *a, const char *b)
 }
 
 @implementation Shell (Semantic)
+- (void) compileShift: (struct Tree *) t op: (const char *) op
+{
+    int lp, dn;
+
+    /* count to B, value to C, op once per count */
+    [self compileTree: t->DRIT];
+    printf("\tpush af\n");
+    [self compileTree: t->DLEF];
+    printf("\tld c, a\n");
+    printf("\tpop af\n");
+    printf("\tld b, a\n");
+    printf("\tld a, b\n");
+    printf("\tor a\n");
+    lp = (*lblc)++;
+    dn = (*lblc)++;
+    printf("\tjr z, L%d\n", dn);
+    printf("L%d:\n", lp);
+    printf("\t%s\n", op);
+    printf("\tdec b\n");
+    printf("\tjr nz, L%d\n", lp);
+    printf("L%d:\n", dn);
+    printf("\tld a, c\n");
+}
+
 - (void) compileTree: (struct Tree *) t
 {
     if (t == 0)
@@ -94,7 +118,6 @@ static int nameEqual(const char *a, const char *b)
             if(i < 0) {
                 [self printString: t->DARR[0]];
                 [self error: ERR_UNDECL code: 255];
-                exit(255);
             }
             // Load 8-bit variable value into accumulator
             printf("\tld a, (%s)\n", symlab[i]);
@@ -168,7 +191,6 @@ static int nameEqual(const char *a, const char *b)
             }
             if(lt != TVAR && lt != TDECL && lt != TADDR) {
                 [self error: ERR_SYNTAX code: 255];
-                exit(255);
             }
             if(lt == TDECL || lt == TADDR) {
                 /* A declaration on the left reserves its space first */
@@ -178,7 +200,6 @@ static int nameEqual(const char *a, const char *b)
             if(i < 0) {
                 [self printString: t->DLEF->DARR[0]];
                 [self error: ERR_UNDECL code: 255];
-                exit(255);
             }
             // Evaluate expression value on the right branch
             [self compileTree: t->DRIT];
@@ -513,7 +534,77 @@ static int nameEqual(const char *a, const char *b)
         case TOUTPUT:
             /* write-only; OUTPUT(port) needs = value */
             [self error: ERR_SYNTAX code: 255];
-            exit(255);
+            break;
+
+        case TSHL:
+            [self compileShift: t op: "ld a, c\n\tsla a\n\tld c, a"];
+            break;
+
+        case TSHR:
+            [self compileShift: t op: "ld a, c\n\tsra a\n\tld c, a"];
+            break;
+
+        case TROL:
+            [self compileShift: t op: "ld a, c\n\trlca\n\tld c, a"];
+            break;
+
+        case TROR:
+            [self compileShift: t op: "ld a, c\n\trrca\n\tld c, a"];
+            break;
+
+        case TSCL:
+            /* carry starts clear and joins the rotate */
+            [self compileShift: t op: "rl c"];
+            break;
+
+        case TSCR:
+            [self compileShift: t op: "rr c"];
+            break;
+
+        case TTIME: {
+            int lp, il, dn;
+
+            /* about 100us per unit at 3.58MHz: 21 inner
+               iterations near 16 cycles, plus the outer */
+            [self compileTree: t->DLEF];
+            printf("\tld b, a\n");
+            lp = (*lblc)++;
+            il = (*lblc)++;
+            dn = (*lblc)++;
+            printf("\tld a, b\n");
+            printf("\tor a\n");
+            printf("\tjr z, L%d\n", dn);
+            printf("L%d:\n", lp);
+            printf("\tld c, 21\n");
+            printf("L%d:\n", il);
+            printf("\tdec c\n");
+            printf("\tjr nz, L%d\n", il);
+            printf("\tdec b\n");
+            printf("\tjr nz, L%d\n", lp);
+            printf("L%d:\n", dn);
+            break;
+        }
+
+        case TDEC:
+            /* decimal-adjust the addition below */
+            [self compileTree: t->DLEF];
+            printf("\tdaa\n");
+            break;
+
+        case TLOW:
+            /* low byte of a byte value is itself */
+            [self compileTree: t->DLEF];
+            break;
+
+        case THIGH:
+            /* high byte of a byte value is zero */
+            [self compileTree: t->DLEF];
+            printf("\tld a, 0\n");
+            break;
+
+        case TDOUBLE:
+            /* zero-extended byte is itself */
+            [self compileTree: t->DLEF];
             break;
 
         case TDISABLE:
@@ -594,11 +685,9 @@ static int nameEqual(const char *a, const char *b)
 		if(nameEqual(symnam[i], na)) {
 			[self printString: na];
 			[self error: ERR_REDECL code: 255];
-			exit(255);
 		}
 	if(*symc == SYMSIZ) {
 		[self error: ERR_LARGE code: 255];
-		exit(255);
 	}
 	/* stored names are canonical: lower case, $ signs dropped,
 	   so emitted labels assemble and lookups match any spelling */
@@ -612,7 +701,6 @@ static int nameEqual(const char *a, const char *b)
 			c = c + 'a' - 'A';
 		if(d >= symnam[*symc] + SYMNAMSIZ - 1) {
 			[self error: ERR_LARGE code: 255];
-			exit(255);
 		}
 		*d++ = (char) c;
 	}
@@ -623,7 +711,6 @@ static int nameEqual(const char *a, const char *b)
 	if(*ramc + size > STACKP) {
 		/* keep clear of the stack base and the reserved top eight */
 		[self error: ERR_LARGE code: 255];
-		exit(255);
 	}
 	symadr[*symc] = *ramc;
 	*ramc += size;
