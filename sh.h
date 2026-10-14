@@ -39,6 +39,7 @@
 #define TWHILE 25
 #define TELSE 26
 #define TDEREF 27
+#define TBLOCK 28
 #define TMUL 20
 #define TDIV 21
 #define TMOD 22
@@ -55,6 +56,7 @@
 #define NUMSIZ 12
 #define SYMSIZ 50
 #define SYMNAMSIZ 32
+#define SYMLABSIZ 48
 #define ORGADR 32768
 
 #define ERR_SYNTAX "syntax error"
@@ -99,7 +101,10 @@ struct Tree {
 	struct Tree trebuf[TRESIZ];
 	char symnam[SYMSIZ][SYMNAMSIZ];
 	int symtyp[SYMSIZ];
+	int symlev[SYMSIZ];
+	char symlab[SYMSIZ][SYMLABSIZ];
 	int *symc;
+	int *scope;
 	int *lblc;
 	int *orgflg;
 	int *treec;
@@ -131,7 +136,7 @@ struct Tree {
 @interface Shell (Semantic)
 - (void) compileTree: (struct Tree *) t;
 - (void) compileAddress: (struct Tree *) t;
-- (void) declareName: (char *) na type: (int) t;
+- (int) declareName: (char *) na type: (int) t;
 - (int) lookupName: (char *) na;
 @end
 
@@ -196,6 +201,7 @@ struct Tree {
 - (jmp_buf *) getJumpBuffer;
 - (int *) getLabelCount;
 - (int *) getSymbolCount;
+- (int *) getScope;
 - (int *) getOrgFlag;
 @end
 #endif /* !SH_H */
