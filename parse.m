@@ -59,6 +59,8 @@ static struct Keyword keyw[] = {
 	{ "high", THIGH },
 	{ "if", TIF },
 	{ "input", TINPUT },
+	{ "last", TLAST },
+	{ "length", TLENGTH },
 	{ "low", TLOW },
 	{ "minus", TSUB },
 	{ "mod", TMOD },
@@ -1513,6 +1515,138 @@ static struct Keyword keyw[] = {
 }
 
 /*
+ * numberValue
+ *	the machine value of a PL/M numeric word, or -1 when
+ *	it is not one; radix suffixes B O Q D H and $ signs
+ *	are honored, after the constants rules
+ */
+- (int) numberValue: (char *) s
+{
+	char buf[64];
+	char c;
+	int n, radix, v, i, d;
+
+	n = 0;
+	for(i = 0; s[i] != '\0'; i++) {
+		if(s[i] == '$')
+			continue;
+		if(n >= 63)
+			return(-1);
+		buf[n++] = s[i];
+	}
+	buf[n] = '\0';
+	if(n == 0)
+		return(-1);
+	c = buf[n-1];
+	if(c >= 'a' && c <= 'z')
+		c = c - 'a' + 'A';
+	radix = 10;
+	if(c == 'H')
+		radix = 16;
+	else if(c == 'B')
+		radix = 2;
+	else if(c == 'O' || c == 'Q')
+		radix = 8;
+	if(c == 'B' || c == 'O' || c == 'Q' ||
+	    c == 'D' || c == 'H') {
+		n--;
+		buf[n] = '\0';
+		if(n == 0)
+			return(-1);
+	}
+	if(buf[0] < '0' || buf[0] > '9')
+		return(-1);
+	v = 0;
+	for(i = 0; i < n; i++) {
+		c = buf[i];
+		if(c >= '0' && c <= '9')
+			d = c - '0';
+		else if(c >= 'a' && c <= 'f')
+			d = c - 'a' + 10;
+		else if(c >= 'A' && c <= 'F')
+			d = c - 'A' + 10;
+		else
+			d = -1;
+		if(d < 0 || d >= radix)
+			return(-1);
+		v = v * radix + d;
+		if(v > 0xFFFF)
+			return(-1);
+	}
+	return(v);
+}
+
+/*
+ * arrayDecl
+ *	DECLARE name (size) BYTE as a TARRAY node; ADDRESS
+ *	arrays need 16-bit values and stay an error
+ */
+- (struct Tree *) arrayDecl: (char **) p1 args: (char **) lp end: (char **) rp
+{
+	struct Tree *t;
+	int size;
+
+	if([self wordIs: p1[2] name: "address"]) {
+		[self error: "ADDRESS arrays need 16-bit values" code: 255];
+		return(0);
+	}
+	if(![self wordIs: p1[2] name: "byte"]) {
+		[self error: ERR_SYNTAX code: 255];
+		return(0);
+	}
+	if(rp != lp+1) {
+		[self error: ERR_SYNTAX code: 255];
+		return(0);
+	}
+	size = [self numberValue: *lp];
+	if(size < 1) {
+		[self error: ERR_SYNTAX code: 255];
+		return(0);
+	}
+	t = [self tree];
+	t->DTYP = TARRAY;
+	t->DARR[0] = p1[1];
+	t->DARR[1] = *lp;
+	return(t);
+}
+
+/*
+ * subscript
+ *	name(index) as a TSUBSCRIPT node; declaredness is
+ *	checked at compile time, like TVAR, so declaring
+ *	and using in one batch keeps working
+ */
+- (struct Tree *) subscript: (char *) na args: (char **) lp end: (char **) rp
+{
+	struct Tree *t;
+
+	t = [self tree];
+	t->DTYP = TSUBSCRIPT;
+	t->DARR[0] = na;
+	t->DLEF = [self syn2: lp end: rp];
+	return(t);
+}
+
+/*
+ * arrayInfo
+ *	LENGTH(name) or LAST(name); the count is known at
+ *	compile time, like TVAR lookup
+ */
+- (struct Tree *) arrayInfo: (int) k args: (char **) lp end: (char **) rp
+{
+	struct Tree *t;
+
+	if(rp != lp+1 || ![self nameOk: *lp]) {
+		[self error: ERR_SYNTAX code: 255];
+		return(0);
+	}
+	t = [self tree];
+	t->DTYP = k;
+	t->DARR[0] = *lp;
+	return(t);
+}
+
+/*
  * syn7
  *	( syn1 )
  *	keyword
@@ -1564,6 +1698,12 @@ static struct Keyword keyw[] = {
 			return [self call2: k args: lp end: rp];
 		if(k == TDEC)
 			return [self callDec: lp end: rp];
+		if(n == 1 && (k == TLENGTH || k == TLAST))
+			return [self arrayInfo: k args: lp end: rp];
+		if(n == 1 && k == -1)
+			return [self subscript: p1[0] args: lp end: rp];
+		if(n == 3 && [self srchx: p1[0]] == TDECL)
+			return [self arrayDecl: p1 args: lp end: rp];
 		if(n != 0)
 			[self error: ERR_SYNTAX code: 255];
 		t = [self tree];
@@ -1641,6 +1781,8 @@ static struct Keyword keyw[] = {
 	case TLOW:
 	case THIGH:
 	case TDOUBLE:
+	case TLENGTH:
+	case TLAST:
 		[self error: ERR_SYNTAX code: 255];
 		return(0);
 	}
