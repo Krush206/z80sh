@@ -119,6 +119,9 @@ static int nameEqual(const char *a, const char *b)
                 [self printString: t->DARR[0]];
                 [self error: ERR_UNDECL code: 255];
             }
+            if([self arraySize: i] > 0) {
+                [self error: ERR_SYNTAX code: 255];
+            }
             // Load 8-bit variable value into accumulator
             printf("\tld a, (%s)\n", symlab[i]);
             break;
@@ -163,6 +166,16 @@ static int nameEqual(const char *a, const char *b)
             break;
         }
 
+        case TARRAY: {
+            int i;
+
+            /* Name RAM for every array element */
+            i = [self declareArray: t->DARR[0] type: TDECL
+                size: [self numberValue: t->DARR[1]]];
+            printf("%s:\tequ 0x%X\n", symlab[i], symadr[i]);
+            break;
+        }
+
         case TASG: {
             register int i, lt;
 
@@ -172,6 +185,15 @@ static int nameEqual(const char *a, const char *b)
                 [self compileTree: t->DRIT];
                 printf("\tpush af\n");
                 [self compileAddress: t->DLEF];
+                printf("\tpop af\n");
+                printf("\tld (hl), a\n");
+                break;
+            }
+            if(lt == TSUBSCRIPT) {
+                /* store into an array element */
+                [self compileTree: t->DRIT];
+                printf("\tpush af\n");
+                [self compileIndex: t->DLEF];
                 printf("\tpop af\n");
                 printf("\tld (hl), a\n");
                 break;
@@ -200,6 +222,9 @@ static int nameEqual(const char *a, const char *b)
             if(i < 0) {
                 [self printString: t->DLEF->DARR[0]];
                 [self error: ERR_UNDECL code: 255];
+            }
+            if([self arraySize: i] > 0) {
+                [self error: ERR_SYNTAX code: 255];
             }
             // Evaluate expression value on the right branch
             [self compileTree: t->DRIT];
@@ -517,8 +542,32 @@ static int nameEqual(const char *a, const char *b)
             break;
         }
 
+        case TLENGTH:
+        case TLAST: {
+            int i, n;
+
+            i = [self lookupName: t->DARR[0]];
+            if(i < 0) {
+                [self printString: t->DARR[0]];
+                [self error: ERR_UNDECL code: 255];
+            }
+            n = [self arraySize: i];
+            if(n <= 0) {
+                [self error: ERR_SYNTAX code: 255];
+            }
+            if(t->DTYP == TLAST)
+                n--;
+            printf("\tld a, %d\n", n);
+            break;
+        }
+
         case TDEREF:
             [self compileAddress: t];
+            printf("\tld a, (hl)\n");
+            break;
+
+        case TSUBSCRIPT:
+            [self compileIndex: t];
             printf("\tld a, (hl)\n");
             break;
 
@@ -667,6 +716,26 @@ static int nameEqual(const char *a, const char *b)
 	printf("\tout (0x7F), a\n");
 }
 
+- (void) compileIndex: (struct Tree *) t
+{
+    int i;
+
+    /* hl aims at the array element; a holds the index */
+    i = [self lookupName: t->DARR[0]];
+    if(i < 0) {
+        [self printString: t->DARR[0]];
+        [self error: ERR_UNDECL code: 255];
+    }
+    if([self arraySize: i] <= 0) {
+        [self error: ERR_SYNTAX code: 255];
+    }
+    [self compileTree: t->DLEF];
+    printf("\tld e, a\n");
+    printf("\tld hl, %s\n", symlab[i]);
+    printf("\tld d, 0\n");
+    printf("\tadd hl, de\n");
+}
+
 - (void) compileAddress: (struct Tree *) t
 {
 	/* hl holds the pointer value of t, which is a TDEREF node */
@@ -707,6 +776,7 @@ static int nameEqual(const char *a, const char *b)
 	*d = '\0';
 	symtyp[*symc] = t;
 	symlev[*symc] = *scope;
+	symsiz[*symc] = 0;
 	size = (t == TADDR) ? 2 : 1;
 	if(*ramc + size > STACKP) {
 		/* keep clear of the stack base and the reserved top eight */
@@ -714,6 +784,58 @@ static int nameEqual(const char *a, const char *b)
 	}
 	symadr[*symc] = *ramc;
 	*ramc += size;
+	if(*scope == 0)
+		(void) strcpy(symlab[*symc], symnam[*symc]);
+	else {
+		(void) strcpy(symlab[*symc], symnam[*symc]);
+		(void) strcat(symlab[*symc], "_");
+		(void) strcat(symlab[*symc], [self integerToASCII: (*lblc)++]);
+	}
+	return((*symc)++);
+}
+
+- (int) declareArray: (char *) na type: (int) t size: (int) n
+{
+	char *s, *d;
+	int i;
+	unsigned char c;
+
+	for(i = *symc - 1; i >= 0 && symlev[i] == *scope; i--)
+		if(nameEqual(symnam[i], na)) {
+			[self printString: na];
+			[self error: ERR_REDECL code: 255];
+		}
+	if(*symc == SYMSIZ) {
+		[self error: ERR_LARGE code: 255];
+	}
+	s = na;
+	d = symnam[*symc];
+	while(*s) {
+		c = (unsigned char) *s++;
+		if(c == '$')
+			continue;
+		if(c >= 'A' && c <= 'Z')
+			c = c + 'a' - 'A';
+		if(d >= symnam[*symc] + SYMNAMSIZ - 1) {
+			[self error: ERR_LARGE code: 255];
+		}
+		*d++ = (char) c;
+	}
+	*d = '\0';
+	symtyp[*symc] = t;
+	symlev[*symc] = *scope;
+	symsiz[*symc] = n;
+	if(n > 255) {
+		/* subscripts are bytes, so larger arrays
+		   strand their LENGTH past ld a */
+		[self error: ERR_LARGE code: 255];
+	}
+	if(*ramc + n > STACKP) {
+		/* keep clear of the stack base and the reserved top eight */
+		[self error: ERR_LARGE code: 255];
+	}
+	symadr[*symc] = *ramc;
+	*ramc += n;
 	if(*scope == 0)
 		(void) strcpy(symlab[*symc], symnam[*symc]);
 	else {
@@ -732,5 +854,10 @@ static int nameEqual(const char *a, const char *b)
 		if(nameEqual(symnam[i], na))
 			return(i);
 	return(-1);
+}
+
+- (int) arraySize: (int) i
+{
+	return symsiz[i];
 }
 @end
