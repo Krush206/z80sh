@@ -116,9 +116,8 @@ static struct Keyword keyw[] = {
 		return(0);
 	if(p1+1 == ep-1) {
 		t = [self tree];
-		t->DTYP = TLST;
+		t->DTYP = TBLOCK;
 		t->DLEF = 0;
-		t->DRIT = 0;
 		return(t);
 	}
 	qp = p1+1;
@@ -127,12 +126,14 @@ static struct Keyword keyw[] = {
 		qp++;
 	if(qp == ep-1) {
 		t = [self tree];
-		t->DTYP = TLST;
+		t->DTYP = TBLOCK;
 		t->DLEF = 0;
-		t->DRIT = 0;
 		return(t);
 	}
-	return [self syn1: qp end: ep-1];
+	t = [self tree];
+	t->DTYP = TBLOCK;
+	t->DLEF = [self syn1: qp end: ep-1];
+	return(t);
 }
 
 /*
