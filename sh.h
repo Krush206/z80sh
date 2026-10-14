@@ -48,6 +48,18 @@
 #define TENABLE 37
 #define THALT 38
 #define TBYTE 39
+#define TCASE 40
+#define TSHL 41
+#define TSHR 42
+#define TROL 43
+#define TROR 44
+#define TSCL 45
+#define TSCR 46
+#define TTIME 47
+#define TDEC 48
+#define TLOW 49
+#define THIGH 50
+#define TDOUBLE 51
 #define TMUL 20
 #define TDIV 21
 #define TMOD 22
@@ -120,6 +132,7 @@ struct Tree {
 
 @interface Shell (Semantic)
 - (void) compileTree: (struct Tree *) t;
+- (void) compileShift: (struct Tree *) t op: (const char *) op;
 - (void) prologue;
 - (void) compileAddress: (struct Tree *) t;
 - (int) declareName: (char *) na type: (int) t;
@@ -145,7 +158,7 @@ struct Tree {
 - (struct Tree *) syn3: (char **) p1 end: (char **) p2;
 - (struct Tree *) syn4: (char **) p1 end: (char **) p2;
 - (struct Tree *) syn7: (char **) p1 end: (char **) p2;
-- (struct Tree *) synxor: (char **) p1 end: (char **) p2;
+- (struct Tree *) synnot: (char **) p1 end: (char **) p2;
 - (struct Tree *) syneq: (char **) p1 end: (char **) p2;
 - (struct Tree *) synrel: (char **) p1 end: (char **) p2;
 - (struct Tree *) synadd: (char **) p1 end: (char **) p2;
@@ -161,7 +174,14 @@ struct Tree {
 - (char **) matchElse: (char **) p1 end: (char **) p2;
 - (char **) findSemi: (char **) p1 end: (char **) p2;
 - (char **) findTo: (char **) p1 end: (char **) p2;
+- (char **) findComma: (char **) p1 end: (char **) p2;
+- (char **) findPlus: (char **) p1 end: (char **) p2;
+- (char **) skipSep: (char **) p1 end: (char **) p2;
+- (int) splitCase: (char **) p1 end: (char **) p2 into: (struct Tree **) stmts;
 - (struct Tree *) call: (int) k args: (char **) lp end: (char **) rp;
+- (struct Tree *) call2: (int) k args: (char **) lp end: (char **) rp;
+- (struct Tree *) callDec: (char **) lp end: (char **) rp;
+- (char **) findAssign: (char **) p1 end: (char **) p2;
 - (void) stripDollar: (char *) s;
 - (struct Tree *) doStatement: (char **) p1 end: (char **) p2;
 - (struct Tree *) tree;
