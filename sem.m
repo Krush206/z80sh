@@ -33,6 +33,42 @@
 
 #import "sh.h"
 
+/*
+ * nameEqual
+ *	true when the stored name a and the source name b
+ *	spell the same identifier: case-insensitive with
+ *	$ signs dropped, after PL/M-80
+ */
+static int nameEqual(const char *a, const char *b)
+{
+	unsigned char c, d;
+
+	if(a == 0 || b == 0)
+		return(0);
+	for(;;) {
+		c = (unsigned char) *a;
+		if(c == '$') {
+			a++;
+			continue;
+		}
+		d = (unsigned char) *b;
+		if(d == '$') {
+			b++;
+			continue;
+		}
+		if(c >= 'A' && c <= 'Z')
+			c = c + 'a' - 'A';
+		if(d >= 'A' && d <= 'Z')
+			d = d + 'a' - 'A';
+		if(c != d)
+			return(0);
+		if(c == '\0')
+			return(1);
+		a++;
+		b++;
+	}
+}
+
 @implementation Shell (Semantic)
 - (void) compileTree: (struct Tree *) t
 {
@@ -480,6 +516,18 @@
             exit(255);
             break;
 
+        case TDISABLE:
+            printf("\tdi\n");
+            break;
+
+        case TENABLE:
+            printf("\tei\n");
+            break;
+
+        case THALT:
+            printf("\thalt\n");
+            break;
+
         case TBLOCK: {
             register int n, lv, ra;
 
@@ -540,9 +588,10 @@
 {
 	register char *s, *d;
 	register int i, size;
+	unsigned char c;
 
 	for(i = *symc - 1; i >= 0 && symlev[i] == *scope; i--)
-		if(strcmp(symnam[i], na) == 0) {
+		if(nameEqual(symnam[i], na)) {
 			[self printString: na];
 			[self error: ERR_REDECL code: 255];
 			exit(255);
@@ -551,14 +600,21 @@
 		[self error: ERR_LARGE code: 255];
 		exit(255);
 	}
+	/* stored names are canonical: lower case, $ signs dropped,
+	   so emitted labels assemble and lookups match any spelling */
 	s = na;
 	d = symnam[*symc];
 	while(*s) {
+		c = (unsigned char) *s++;
+		if(c == '$')
+			continue;
+		if(c >= 'A' && c <= 'Z')
+			c = c + 'a' - 'A';
 		if(d >= symnam[*symc] + SYMNAMSIZ - 1) {
 			[self error: ERR_LARGE code: 255];
 			exit(255);
 		}
-		*d++ = *s++;
+		*d++ = (char) c;
 	}
 	*d = '\0';
 	symtyp[*symc] = t;
@@ -572,9 +628,9 @@
 	symadr[*symc] = *ramc;
 	*ramc += size;
 	if(*scope == 0)
-		(void) strcpy(symlab[*symc], na);
+		(void) strcpy(symlab[*symc], symnam[*symc]);
 	else {
-		(void) strcpy(symlab[*symc], na);
+		(void) strcpy(symlab[*symc], symnam[*symc]);
 		(void) strcat(symlab[*symc], "_");
 		(void) strcat(symlab[*symc], [self integerToASCII: (*lblc)++]);
 	}
@@ -586,7 +642,7 @@
 	register int i;
 
 	for(i = *symc - 1; i >= 0; i--)
-		if(strcmp(symnam[i], na) == 0)
+		if(nameEqual(symnam[i], na))
 			return(i);
 	return(-1);
 }
