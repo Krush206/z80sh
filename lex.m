@@ -77,7 +77,7 @@ loop:
 		*(*linep)++ = c;
 		c1 = [self getCharacter: DOLREPL];
 		if(c1 == c)
-			*(*line)++ = c1;
+			*(*linep)++ = c1;
 		else
 			*peekc = c1;
 		*(*linep)++ = '\0';
@@ -88,7 +88,7 @@ loop:
 		*(*linep)++ = c;
 		c1 = [self getCharacter: DOLREPL];
 		if(c1 == '=')
-			*(*linep)++ = c;
+			*(*linep)++ = c1;
 		else
 			*peekc = c1;
 		*(*linep)++ = '\0';
