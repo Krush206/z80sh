@@ -51,15 +51,6 @@
 	write(2, &cc, (size_t) 1);
 }
 
-- (void) printNumber: (int) n
-{
-	register int a;
-
-	if ((a = n/10))
-		[self printNumber: a];
-	[self putCharacter: n%10 + '0'];
-}
-
 - (int) anyCharacter: (int) c in: (const char *) as
 {
 	register const char *s;
@@ -67,18 +58,6 @@
 	s = as;
 	while(*s)
 		if(*s++ == c)
-			return(1);
-	return(0);
-}
-
-- (int) equalString: (const char *) as1 to: (const char *) as2
-{
-	register const char *s1, *s2;
-
-	s1 = as1;
-	s2 = as2;
-	while(*s1++ == *s2)
-		if(*s2++ == '\0')
 			return(1);
 	return(0);
 }
@@ -91,43 +70,6 @@
 		lseek(0, (off_t) 0, SEEK_END);
 		exit(exitno);
 	}
-}
-
-- (int) lastCharacter: (char *) cp
-{
-	register int c;
-
-	c = cp[0];
-	if(c == 0)
-		return c;
-	while((c = cp[1]) != 0)
-		cp++;
-	return c = cp[0];
-}
-
-- (void) scan: (struct Tree *) at selector: (SEL) sel
-{
-	typedef int (*method_t)(id, SEL, int);
-	register char *p, **t, c;
-	void *imp;
-
-	t = at->DARR;
-	imp = objc_msg_lookup(self, sel);
-	while((p = *t++))
-		while((c = *p))
-			*p++ = (*(method_t) imp)(self, sel, c);
-}
-
-- (int) glob: (int) c
-{
-	if([self anyCharacter: c in: "[?*"])
-		*gflg = 1;
-	return(c);
-}
-
-- (int) trim: (int) c
-{
-	return(c&0177);
 }
 
 - (char *) integerToASCII: (int) n
@@ -156,76 +98,6 @@
 - (void) setPIDPointer: (char *) ptr
 {
 	(void) memcpy(pidp, ptr, sizeof pidp);
-}
-
-- (struct Tree *) getTreeBuffer
-{
-	return trebuf;
-}
-
-- (void) setTreeBuffer: (struct Tree *) ptr
-{
-	(void) memcpy(trebuf, ptr, sizeof trebuf);
-}
-
-- (char **) getArguments
-{
-	return args;
-}
-
-- (void) setArguments: (char **) ptr
-{
-	(void) memcpy(args, ptr, sizeof args);
-}
-
-- (char (*)[]) getSetASCII
-{
-	return seta;
-}
-
-- (void) setSetASCII: (char (*)[]) ptr
-{
-	(void) memcpy(seta, ptr, sizeof seta);
-}
-
-- (char *) getMessage
-{
-	return msg;
-}
-
-- (void) setMessage: (char *) ptr
-{
-	(void) memcpy(msg, ptr, sizeof msg);
-}
-
-- (char *) getLine
-{
-	return line;
-}
-
-- (void) setLine: (char *) ptr
-{
-	(void) memcpy(line, ptr, sizeof line);
-}
-
-- (struct Argument *) getArgumentBuffer
-{
-	return argbuf;
-}
-
-- (void) setArgumentBuffer: (struct Argument *) ptr
-{
-	(void) memcpy(argbuf, ptr, sizeof argbuf);
-}
-
-- (id) getFunction
-{
-	return func;
-}
-
-- (void) setFunction: (id) ptr
-{
-	func = ptr;
 }
 
 - (int *) getTreeCount
@@ -375,10 +247,24 @@
 	return jmp = &ret;
 }
 
-- (struct Argument *) getArgumentDefinition
+- (int *) getLabelCount
 {
-	static struct Argument ret;
+	static int ret;
 
-	return argdef = &ret;
+	return lblc = &ret;
+}
+
+- (int *) getSymbolCount
+{
+	static int ret;
+
+	return symc = &ret;
+}
+
+- (int *) getOrgFlag
+{
+	static int ret;
+
+	return orgflg = &ret;
 }
 @end
