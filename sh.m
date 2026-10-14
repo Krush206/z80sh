@@ -44,16 +44,11 @@ main(int c, char *av[])
 {
 	register id sh;
 	register char **v;
-	int f, i;
+	int f;
 
 	sh = [self new];
 	(void) [sh getTreeCount];
 	(void) [sh getErrorValue];
-	(void) [sh getCurrentDollarPointer];
-	(void) [sh getDollarPointer];
-	(void) [sh getDollarVector];
-	(void) [sh getDollarCount];
-	(void) [sh getPrompt];
 	(void) [sh getLinePointer];
 	(void) [sh getEndLinePointer];
 	(void) [sh getArgumentPointer];
@@ -61,82 +56,24 @@ main(int c, char *av[])
 	(void) [sh getPeekCharacter];
 	(void) [sh getGlobFlag];
 	(void) [sh getError];
-	(void) [sh getUserID];
-	(void) [sh getSetInterrupt];
-	(void) [sh getArgumentInput];
-	(void) [sh getOneLineFlag];
-	(void) [sh getStopError];
-	(void) [sh getExecuteFlag];
-	(void) [sh getJumpBuffer];
 	(void) [sh getLabelCount];
 	(void) [sh getSymbolCount];
 	(void) [sh getScope];
+	(void) [sh getRamPointer];
 	(void) [sh getOrgFlag];
-	(void) strcpy([sh getPIDPointer], [sh integerToASCII: getpid()]);
 	v = av;
-	for(i = 1; i + 1 < c; i++) {
-		if(strcmp(v[i], "-o") != 0)
-			continue;
-		f = open(v[i+1], O_WRONLY | O_CREAT | O_TRUNC, 0644);
-		if(f < 0) {
-			[sh printString: v[i+1]];
-			[sh error: ERR_CREATE code: 255];
-		}
-		dup2(f, 1);
-		close(f);
-		for(f = i; f + 2 < c; f++)
-			v[f] = v[f+2];
-		c -= 2;
-		v[c] = NULL;
-		i--;
-	}
-	*[sh getPrompt] = "% ";
-	if(getuid() == 0)
-		*[sh getPrompt] = "# ";
-	if(!isatty(0))
-		*[sh getPrompt] = NULL;
-	*[sh getStopError] = 0;
-	if(c>1 && v[1][0]=='-' && v[1][1]=='e') {
-		++(*[sh getStopError]);
-		v[1] = v[0];
-		++v;
-		--c;
-	}
-	*[sh getArgumentInput] = NULL;
-	*[sh getExecuteFlag] = *[sh getOneLineFlag] = 0;
 	if(c > 1) {
-		*[sh getPrompt] = NULL;
-		if (*v[1]=='-') {
-			*[sh getExecuteFlag] = 1;
-			if (v[1][1]=='c' && c>2)
-				*[sh getArgumentInput] = v[2];
-			else if (v[1][1]=='t')
-				*[sh getOneLineFlag] = 2;
-		} else {
-			close(0);
-			f = open(v[1], 0);
-			if(f < 0) {
-				[sh printString: v[1]];
-				[sh error: ERR_OPEN code: 255];
-			}
+		close(0);
+		f = open(v[1], 0);
+		if(f < 0) {
+			[sh printString: v[1]];
+			[sh error: ERR_OPEN code: 255];
 		}
 	}
-	*[sh getSetInterrupt] = 0;
-	if(*[sh getExecuteFlag]) {
-		signal(SIGQUIT, SIG_DFL);
-		signal(SIGINT, SIG_DFL);
-		if (*[sh getArgumentInput]==NULL&&*[sh getOneLineFlag]==0)
-			(*[sh getSetInterrupt])++;
-	}
-	*[sh getDollarVector] = v;
-	*[sh getDollarCount] = c;
 loop:
-	if(*[sh getPrompt] != NULL)
-		[sh printString: *[sh getPrompt]];
-	*[sh getPeekCharacter] = [sh getCharacter: !DOLREPL];
+	*[sh getPeekCharacter] = [sh getCharacter];
 	[sh main];
 	goto loop;
-	object_dispose(sh);
 	return 0;
 }
 
@@ -152,19 +89,13 @@ loop:
 	*error = 0;
 	*gflg = 0;
 	do {
-		if(*promp != NULL && *linep != line)
-			[self printString: "> "];
 		cp = *linep;
 		[self word];
 	} while(*cp != '\n' || [self braceDepth: args end: *argp] > 0);
 	*treec = 0;
 	if(*gflg == 0) {
-		if(*error == 0) {
-			setjmp(*jmp);
-			if (*error)
-				return;
+		if(*error == 0)
 			t = [self syntax: args end: *argp];
-		}
 		if(*error != 0)
 			[self error: ERR_SYNTAX code: 255]; else
 			[self compileTree: t];
