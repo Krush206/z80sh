@@ -37,16 +37,35 @@
  * the keywords for the parser, after the C shell's srchn
  * table from init.c; each row adds a keyword by spelling
  * and node type, handled where srchx is consulted below;
- * rows stay in alphabetical order for the binary search
+ * rows stay in alphabetical order for the binary search;
+ * spellings are lower case and matched case-insensitively
+ * with $ signs ignored, after PL/M-80; every row maps to
+ * a token with real parser support, no placeholders
  */
 static struct Keyword keyw[] = {
 	{ "address", TADDR },
+	{ "and", TAND2 },
+	{ "byte", TBYTE },
+	{ "declare", TDECL },
+	{ "disable", TDISABLE },
+	{ "do", TDO },
 	{ "else", TELSE },
+	{ "enable", TENABLE },
+	{ "end", TEND },
+	{ "halt", THALT },
 	{ "if", TIF },
 	{ "input", TINPUT },
 	{ "int", TDECL },
+	{ "minus", TSUB },
+	{ "mod", TMOD },
+	{ "not", TNOT },
+	{ "or", TOR2 },
 	{ "output", TOUTPUT },
-	{ "while", TWHILE }
+	{ "plus", TADD },
+	{ "then", TTHEN },
+	{ "to", TTO },
+	{ "while", TWHILE },
+	{ "xor", TXOR }
 };
 
 @implementation Shell (Parser)
@@ -108,6 +127,21 @@ static struct Keyword keyw[] = {
 	k = [self srchx: *p1];
 	if(k == TIF || k == TWHILE)
 		return [self statement: p1 end: p2];
+	if(k == TDO) {
+		char **m;
+
+		/* a DO range parses only through its matching END */
+		m = [self matchEnd: p1 end: p2];
+		if(m == 0)
+			return(0);
+		ep = p2;
+		while(ep != m+1 && (*(ep-1))[1] == '\0' &&
+		    (**(ep-1) == ';' || **(ep-1) == '\n'))
+			ep--;
+		if(ep != m+1)
+			return(0);
+		return [self statement: p1 end: m+1];
+	}
 	if(**p1 != '{' || (*p1)[1] != '\0')
 		return(0);
 	ep = p2;
@@ -142,56 +176,68 @@ static struct Keyword keyw[] = {
  * syn1
  *	syn2
  *	syn2 ; syntax
+ *
+ *	; and newline split at depth zero, where depth counts
+ *	parens, braces and DO..END pairs alike, so neither a
+ *	block nor a DO group ever splits in the middle
  */
 - (struct Tree *) syn1: (char **) p1 end: (char **) p2
 {
 	register char **p;
 	register struct Tree *t;
-	int l;
+	int l, dd;
 
 	l = 0;
+	dd = 0;
 	if(p1 != p2) {
 		t = [self headparse: p1 end: p2];
 		if(t != 0)
 			return(t);
 	}
-	for(p=p1; p!=p2; p++)
-	switch(**p) {
-
-	case '(':
-		l++;
-		continue;
-
-	case ')':
-		l--;
-		continue;
-
-	case '{':
-		l++;
-		continue;
-
-	case '}':
-		l--;
-		continue;
-
-	case ';':
-	case '\n':
+	for(p=p1; p!=p2; p++) {
 		if(l == 0) {
-			register struct Tree *t1;
+			if([self wordIs: *p name: "do"])
+				dd++;
+			else if([self wordIs: *p name: "end"])
+				dd--;
+		}
+		switch(**p) {
 
-			t = [self tree];
-			t->DTYP = TLST;
-			t->DLEF = [self headparse: p1 end: p];
-			if(t->DLEF == 0)
-				t->DLEF = [self syn2: p1 end: p];
-			if((t1 = [self syntax: p+1 end: p2]))
-				t->DRIT = t1;
-			else
-				t->DRIT = 0;
-			return(t);
+		case '(':
+			l++;
+			continue;
+
+		case ')':
+			l--;
+			continue;
+
+		case '{':
+			l++;
+			continue;
+
+		case '}':
+			l--;
+			continue;
+
+		case ';':
+		case '\n':
+			if(l == 0 && dd == 0) {
+				register struct Tree *t1;
+
+				t = [self tree];
+				t->DTYP = TLST;
+				t->DLEF = [self headparse: p1 end: p];
+				if(t->DLEF == 0)
+					t->DLEF = [self syn2: p1 end: p];
+				if((t1 = [self syntax: p+1 end: p2]))
+					t->DRIT = t1;
+				else
+					t->DRIT = 0;
+				return(t);
+			}
 		}
 	}
-	if(l == 0)
+	if(l == 0 && dd == 0)
 		return [self syn2: p1 end: p2];
 	(*error)++;
 	return(0);
@@ -199,78 +245,339 @@ static struct Keyword keyw[] = {
 
 /*
  * statement
- *	if ( syn2 ) syn1
- *	if ( syn2 ) syn1 else syn1
- *	while ( syn2 ) syn1
+ *	if ( syn3 ) [THEN] syn1
+ *	if ( syn3 ) [THEN] syn1 else syn1
+ *	if syn3 THEN syn1 [ELSE syn1]
+ *	while ( syn3 ) [THEN] syn1
+ *	doStatement, below
  *
  * bodies are single line ranges; syn1 parses them so they
  * nest, chain with ; and form { } blocks; an else past any
- * nested ifs belongs to this if, after the C shell's syn3
+ * nested ifs belongs to this if, after the C shell's syn3;
+ * conditions run through syn3 rather than syn2 so that a
+ * PL/M = inside one compares instead of assigning
  */
 - (struct Tree *) statement: (char **) p1 end: (char **) p2
 {
 	register char **p;
 	register char **rp;
 	register char **ep;
+	char **tp;
+	char **bs;
 	register struct Tree *t;
-	int l, k, nest;
+	int l, k, nest, dd;
 
-	if(p2 < p1+2 || strcmp(*(p1+1), "(") != 0) {
+	k = [self srchx: *p1];
+	if(k == TDO)
+		return [self doStatement: p1 end: p2];
+	if(p2 >= p1+2 && strcmp(*(p1+1), "(") == 0) {
+		l = 0;
+		rp = 0;
+		for(p=p1+1; p!=p2; p++) {
+			if(strcmp(*p, "(") == 0)
+				l++;
+			else if(strcmp(*p, ")") == 0) {
+				l--;
+				if(l == 0) {
+					rp = p;
+					break;
+				}
+			}
+		}
+		if(rp == 0) {
+			(*error)++;
+			return(0);
+		}
+		t = [self tree];
+		if(k == TWHILE) {
+			t->DTYP = TWHILE;
+			t->DLEF = [self syn3: p1+2 end: rp];
+			p = rp+1;
+			if(p != p2 && [self wordIs: *p name: "then"])
+				p++;
+			t->DRIT = [self syn1: p end: p2];
+			return(t);
+		}
+		if(k != TIF) {
+			(*error)++;
+			return(0);
+		}
+		t->DTYP = TIF;
+		t->DLEF = [self syn3: p1+2 end: rp];
+		t->DSTR = 0;
+		p = rp+1;
+		if(p != p2 && [self wordIs: *p name: "then"])
+			p++;
+		bs = p;
+		nest = 0;
+		l = 0;
+		dd = 0;
+		ep = 0;
+		for(; p!=p2; p++) {
+			if(strcmp(*p, "(") == 0 || strcmp(*p, "{") == 0)
+				l++;
+			else if(strcmp(*p, ")") == 0 || strcmp(*p, "}") == 0)
+				l--;
+			else if(l == 0) {
+				if([self wordIs: *p name: "do"])
+					dd++;
+				else if([self wordIs: *p name: "end"])
+					dd--;
+				else if(dd == 0 && [self wordIs: *p name: "if"])
+					nest++;
+				else if(dd == 0 && [self wordIs: *p name: "else"]) {
+					if(nest == 0) {
+						ep = p;
+						break;
+					}
+					nest--;
+				}
+			}
+		}
+		if(ep != 0) {
+			t->DRIT = [self syn1: bs end: ep];
+			t->DSTR = [self syn1: ep+1 end: p2];
+		}
+		else
+			t->DRIT = [self syn1: bs end: p2];
+		return(t);
+	}
+	if(k != TIF) {
 		(*error)++;
 		return(0);
 	}
 	l = 0;
-	rp = 0;
+	dd = 0;
+	tp = 0;
 	for(p=p1+1; p!=p2; p++) {
-		if(strcmp(*p, "(") == 0)
+		if(strcmp(*p, "(") == 0 || strcmp(*p, "{") == 0) {
 			l++;
-		else if(strcmp(*p, ")") == 0) {
+			continue;
+		}
+		if(strcmp(*p, ")") == 0 || strcmp(*p, "}") == 0) {
 			l--;
-			if(l == 0) {
-				rp = p;
-				break;
-			}
+			continue;
+		}
+		if(l != 0)
+			continue;
+		if([self wordIs: *p name: "do"]) {
+			dd++;
+			continue;
+		}
+		if([self wordIs: *p name: "end"]) {
+			dd--;
+			continue;
+		}
+		if(dd == 0 && [self wordIs: *p name: "then"]) {
+			tp = p;
+			break;
 		}
 	}
-	if(rp == 0) {
+	if(tp == 0) {
 		(*error)++;
 		return(0);
 	}
 	t = [self tree];
-	k = [self srchx: *p1];
-	if(k == TWHILE) {
-		t->DTYP = TWHILE;
-		t->DLEF = [self syn2: p1+2 end: rp];
-		t->DRIT = [self syn1: rp+1 end: p2];
-		return(t);
-	}
 	t->DTYP = TIF;
-	t->DLEF = [self syn2: p1+2 end: rp];
+	t->DLEF = [self syn3: p1+1 end: tp];
 	t->DSTR = 0;
+	bs = tp+1;
+	p = bs;
 	nest = 0;
 	l = 0;
+	dd = 0;
 	ep = 0;
-	for(p=rp+1; p!=p2; p++) {
+	for(; p!=p2; p++) {
 		if(strcmp(*p, "(") == 0 || strcmp(*p, "{") == 0)
 			l++;
 		else if(strcmp(*p, ")") == 0 || strcmp(*p, "}") == 0)
 			l--;
-		else if(l == 0 && strcmp(*p, "if") == 0)
-			nest++;
-		else if(l == 0 && strcmp(*p, "else") == 0) {
-			if(nest == 0) {
-				ep = p;
-				break;
+		else if(l == 0) {
+			if([self wordIs: *p name: "do"])
+				dd++;
+			else if([self wordIs: *p name: "end"])
+				dd--;
+			else if(dd == 0 && [self wordIs: *p name: "if"])
+				nest++;
+			else if(dd == 0 && [self wordIs: *p name: "else"]) {
+				if(nest == 0) {
+					ep = p;
+					break;
+				}
+				nest--;
 			}
-			nest--;
 		}
 	}
 	if(ep != 0) {
-		t->DRIT = [self syn1: rp+1 end: ep];
+		t->DRIT = [self syn1: bs end: ep];
 		t->DSTR = [self syn1: ep+1 end: p2];
 	}
 	else
-		t->DRIT = [self syn1: rp+1 end: p2];
+		t->DRIT = [self syn1: bs end: p2];
+	return(t);
+}
+
+/*
+ * doStatement
+ *	DO; syn1 END
+ *	DO WHILE syn3; syn1 END
+ *	DO variable = syn3 TO syn3; syn1 END
+ *
+ * the iterative form desugars to an assignment and a
+ * WHILE loop over existing node types, so no new code
+ * generation is needed for it; the loop variable must
+ * already be declared, after PL/M-80
+ */
+- (struct Tree *) doStatement: (char **) p1 end: (char **) p2
+{
+	char **p;
+	char **m, **q, **semi, **topos, **ep;
+	char *var;
+	struct Tree *t, *e1, *e2, *body;
+	struct Tree *v1, *v2, *v3, *v4, *n1;
+	struct Tree *init, *cond, *incr, *incv, *loop, *lbody, *root;
+	int l;
+
+	m = [self matchEnd: p1 end: p2];
+	if(m == 0) {
+		(*error)++;
+		return(0);
+	}
+	ep = p2;
+	while(ep != m+1 && (*(ep-1))[1] == '\0' &&
+	    (**(ep-1) == ';' || **(ep-1) == '\n'))
+		ep--;
+	if(ep != m+1) {
+		(*error)++;
+		return(0);
+	}
+	t = [self tree];
+	p = p1+1;
+	if(p != m && [self wordIs: *p name: "while"]) {
+		l = 0;
+		semi = 0;
+		for(q=p+1; q!=m; q++) {
+			if(strcmp(*q, "(") == 0 || strcmp(*q, "{") == 0) {
+				l++;
+				continue;
+			}
+			if(strcmp(*q, ")") == 0 || strcmp(*q, "}") == 0) {
+				l--;
+				continue;
+			}
+			if(l == 0 && strcmp(*q, ";") == 0) {
+				semi = q;
+				break;
+			}
+		}
+		if(semi == 0) {
+			(*error)++;
+			return(0);
+		}
+		t->DTYP = TWHILE;
+		t->DLEF = [self syn3: p+1 end: semi];
+		q = semi+1;
+		while(q != m && (strcmp(*q, ";") == 0 || strcmp(*q, "\n") == 0))
+			q++;
+		t->DRIT = [self syn1: q end: m];
+		return(t);
+	}
+	if(p != m && strcmp(*p, ";") != 0 && strcmp(*p, "\n") != 0 &&
+	    [self srchx: *p] == -1 && [self nameOk: *p] &&
+	    p+1 != m && strcmp(*(p+1), "=") == 0) {
+		var = *p;
+		l = 0;
+		topos = 0;
+		for(q=p+2; q!=m; q++) {
+			if(strcmp(*q, "(") == 0 || strcmp(*q, "{") == 0) {
+				l++;
+				continue;
+			}
+			if(strcmp(*q, ")") == 0 || strcmp(*q, "}") == 0) {
+				l--;
+				continue;
+			}
+			if(l == 0 && [self wordIs: *q name: "to"]) {
+				topos = q;
+				break;
+			}
+		}
+		l = 0;
+		semi = 0;
+		if(topos != 0)
+			for(q=topos+1; q!=m; q++) {
+				if(strcmp(*q, "(") == 0 || strcmp(*q, "{") == 0) {
+					l++;
+					continue;
+				}
+				if(strcmp(*q, ")") == 0 || strcmp(*q, "}") == 0) {
+					l--;
+					continue;
+				}
+				if(l == 0 && strcmp(*q, ";") == 0) {
+					semi = q;
+					break;
+				}
+			}
+		if(topos == 0 || semi == 0) {
+			(*error)++;
+			return(0);
+		}
+		e1 = [self syn3: p+2 end: topos];
+		e2 = [self syn3: topos+1 end: semi];
+		q = semi+1;
+		while(q != m && (strcmp(*q, ";") == 0 || strcmp(*q, "\n") == 0))
+			q++;
+		body = [self syn1: q end: m];
+		v1 = [self tree];
+		v1->DTYP = TVAR;
+		v1->DARR[0] = var;
+		v2 = [self tree];
+		v2->DTYP = TVAR;
+		v2->DARR[0] = var;
+		v3 = [self tree];
+		v3->DTYP = TVAR;
+		v3->DARR[0] = var;
+		v4 = [self tree];
+		v4->DTYP = TVAR;
+		v4->DARR[0] = var;
+		n1 = [self tree];
+		n1->DTYP = TNUM;
+		n1->DARR[0] = "1";
+		init = [self tree];
+		init->DTYP = TASG;
+		init->DLEF = v1;
+		init->DRIT = e1;
+		cond = [self tree];
+		cond->DTYP = TLEQ;
+		cond->DLEF = v2;
+		cond->DRIT = e2;
+		incv = [self tree];
+		incv->DTYP = TADD;
+		incv->DLEF = v3;
+		incv->DRIT = n1;
+		incr = [self tree];
+		incr->DTYP = TASG;
+		incr->DLEF = v4;
+		incr->DRIT = incv;
+		lbody = [self tree];
+		lbody->DTYP = TLST;
+		lbody->DLEF = body;
+		lbody->DRIT = incr;
+		loop = [self tree];
+		loop->DTYP = TWHILE;
+		loop->DLEF = cond;
+		loop->DRIT = lbody;
+		root = [self tree];
+		root->DTYP = TLST;
+		root->DLEF = init;
+		root->DRIT = loop;
+		return(root);
+	}
+	while(p != m && (strcmp(*p, ";") == 0 || strcmp(*p, "\n") == 0))
+		p++;
+	t->DTYP = TBLOCK;
+	t->DLEF = [self syn1: p end: m];
 	return(t);
 }
 
@@ -327,6 +634,7 @@ static struct Keyword keyw[] = {
  * syn3
  *	syn4
  *	syn3 || syn4
+ *	syn3 OR syn4
  */
 - (struct Tree *) syn3: (char **) p1 end: (char **) p2
 {
@@ -360,6 +668,11 @@ static struct Keyword keyw[] = {
 		if(l == 0 && (*p)[1] == '|')
 			q = p;
 		continue;
+
+	default:
+		if(l == 0 && [self srchx: *p] == TOR2)
+			q = p;
+		continue;
 	}
 	if(q != 0) {
 		t = [self tree];
@@ -378,6 +691,7 @@ static struct Keyword keyw[] = {
  * syn4
  *	syn5
  *	syn4 && syn5
+ *	syn4 AND syn5
  */
 - (struct Tree *) syn4: (char **) p1 end: (char **) p2
 {
@@ -409,6 +723,11 @@ static struct Keyword keyw[] = {
 
 	case '&':
 		if(l == 0 && (*p)[1] == '&')
+			q = p;
+		continue;
+
+	default:
+		if(l == 0 && [self srchx: *p] == TAND2)
 			q = p;
 		continue;
 	}
@@ -482,6 +801,7 @@ static struct Keyword keyw[] = {
  * synxor
  *	syn6
  *	synxor ^ syn6
+ *	synxor XOR syn6
  */
 - (struct Tree *) synxor: (char **) p1 end: (char **) p2
 {
@@ -513,6 +833,11 @@ static struct Keyword keyw[] = {
 
 	case '^':
 		if(l == 0 && (*p)[1] == '\0')
+			q = p;
+		continue;
+
+	default:
+		if(l == 0 && [self srchx: *p] == TXOR)
 			q = p;
 		continue;
 	}
@@ -586,10 +911,13 @@ static struct Keyword keyw[] = {
 /*
  * isOperator
  *	true if w is an operator word or an opener; a '-'
- *	or '+' coming right after one of these is unary
+ *	or '+' coming right after one of these is unary;
+ *	word operators count, after PL/M-80
  */
 - (int) isOperator: (char *) w
 {
+	int k;
+
 	switch(*w) {
 
 	case '=':
@@ -607,6 +935,10 @@ static struct Keyword keyw[] = {
 	case '(':
 		return(1);
 	}
+	k = [self srchx: w];
+	if(k == TAND2 || k == TOR2 || k == TXOR || k == TNOT ||
+	    k == TADD || k == TSUB || k == TMOD)
+		return(1);
 	return(0);
 }
 
@@ -615,6 +947,11 @@ static struct Keyword keyw[] = {
  *	synrel
  *	syneq == synrel
  *	syneq != synrel
+ *	syneq = synrel
+ *	syneq <> synrel
+ *
+ * a lone = compares here; the assignment level above
+ * takes statement-level = first, so the two never clash
  */
 - (struct Tree *) syneq: (char **) p1 end: (char **) p2
 {
@@ -646,7 +983,7 @@ static struct Keyword keyw[] = {
 		continue;
 
 	case '=':
-		if(l == 0 && (*p)[1] == '=') {
+		if(l == 0 && ((*p)[1] == '=' || (*p)[1] == '\0')) {
 			q = p;
 			qc = **p;
 		}
@@ -656,6 +993,13 @@ static struct Keyword keyw[] = {
 		if(l == 0 && (*p)[1] == '=') {
 			q = p;
 			qc = **p;
+		}
+		continue;
+
+	case '<':
+		if(l == 0 && (*p)[1] == '>') {
+			q = p;
+			qc = '!';
 		}
 		continue;
 	}
@@ -745,6 +1089,8 @@ static struct Keyword keyw[] = {
  *	synmul
  *	synadd + synmul
  *	synadd - synmul
+ *	synadd PLUS synmul
+ *	synadd MINUS synmul
  *
  * a '+' or '-' after another operator or opener is unary,
  * so it is left for synun instead of splitting here
@@ -754,7 +1100,7 @@ static struct Keyword keyw[] = {
 	register char **p;
 	register struct Tree *t;
 	char **q;
-	int l, qc;
+	int l, qc, k2;
 
 	l = 0;
 	q = 0;
@@ -785,6 +1131,16 @@ static struct Keyword keyw[] = {
 			qc = **p;
 		}
 		continue;
+
+	default:
+		if(l == 0) {
+			k2 = [self srchx: *p];
+			if(k2 == TADD || k2 == TSUB) {
+				q = p;
+				qc = (k2 == TADD) ? '+' : '-';
+			}
+		}
+		continue;
 	}
 	if(q != 0) {
 		t = [self tree];
@@ -808,6 +1164,7 @@ static struct Keyword keyw[] = {
  *	synmul * synun
  *	synmul / synun
  *	synmul % synun
+ *	synmul MOD synun
  */
 - (struct Tree *) synmul: (char **) p1 end: (char **) p2
 {
@@ -846,6 +1203,13 @@ static struct Keyword keyw[] = {
 			qc = **p;
 		}
 		continue;
+
+	default:
+		if(l == 0 && [self srchx: *p] == TMOD) {
+			q = p;
+			qc = '%';
+		}
+		continue;
 	}
 	if(q != 0) {
 		t = [self tree];
@@ -871,6 +1235,7 @@ static struct Keyword keyw[] = {
  *	- synun
  *	+ synun
  *	! synun
+ *	NOT synun
  *
  * unary minus is 0 - x, logical not is x == 0, so no
  * new node types are needed for them
@@ -903,6 +1268,16 @@ static struct Keyword keyw[] = {
 			t->DRIT = t1;
 			return(t);
 		}
+		if([self wordIs: *p1 name: "not"]) {
+			t = [self tree];
+			t->DTYP = TEQU;
+			t->DLEF = [self synun: p1+1 end: p2];
+			t1 = [self tree];
+			t1->DTYP = TNUM;
+			t1->DARR[0] = "0";
+			t->DRIT = t1;
+			return(t);
+		}
 		if(strcmp(*p1, "*") == 0) {
 			t = [self tree];
 			t->DTYP = TDEREF;
@@ -917,17 +1292,36 @@ static struct Keyword keyw[] = {
  * srchx
  *	the node type for the keyword cp, or -1 when cp is
  *	no keyword; a binary search over the alphabetical
- *	keyw table; after the C shell's srchx()
+ *	keyw table; after the C shell's srchx(); matching is
+ *	case-insensitive with $ signs dropped, after PL/M-80,
+ *	so INPUT, Input and IN$PUT all find the same row
  */
 - (int) srchx: (char *) cp
 {
 	register int first, last, middle, compare;
+	char cb[64];
+	char *s;
+	unsigned char c;
+	int n;
 
+	s = cp;
+	n = 0;
+	while(*s) {
+		c = (unsigned char) *s++;
+		if(c == '$')
+			continue;
+		if(c >= 'A' && c <= 'Z')
+			c = c + 'a' - 'A';
+		if(n >= 63)
+			return(-1);
+		cb[n++] = (char) c;
+	}
+	cb[n] = '\0';
 	first = 0;
 	last = sizeof keyw / sizeof *keyw - 1;
 	while(first <= last) {
 		middle = first + (last - first) / 2;
-		compare = strcmp(cp, keyw[middle].kname);
+		compare = strcmp(cb, keyw[middle].kname);
 		if(compare == 0)
 			return(keyw[middle].ktype);
 		if(compare < 0)
@@ -936,6 +1330,127 @@ static struct Keyword keyw[] = {
 			first = middle + 1;
 	}
 	return(-1);
+}
+
+/*
+ * wordIs
+ *	true when the lexer word w spells the lower case
+ *	name s under the same canonicalization srchx uses;
+ *	quoted characters carry QUOTE bits and never match
+ */
+- (int) wordIs: (char *) w name: (const char *) s
+{
+	unsigned char c;
+
+	if(w == 0 || s == 0)
+		return(0);
+	for(;;) {
+		c = (unsigned char) *w;
+		if(c == '$') {
+			w++;
+			continue;
+		}
+		if(c >= 'A' && c <= 'Z')
+			c = c + 'a' - 'A';
+		if(c != (unsigned char) *s)
+			return(0);
+		if(c == '\0')
+			return(1);
+		w++;
+		s++;
+	}
+}
+
+/*
+ * nameOk
+ *	true when na can be a declared name: a leading
+ *	alphabetic, after PL/M-80 identifiers; the rest of
+ *	the word is checked where it is used
+ */
+- (int) nameOk: (char *) na
+{
+	char c;
+
+	if(na == 0)
+		return(0);
+	c = *na;
+	if((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'))
+		return(1);
+	return(0);
+}
+
+/*
+ * doDepth
+ *	unmatched DO count in the word range, the DO..END
+ *	twin of braceDepth above; paren and brace interiors
+ *	do not count, and quoted words never match
+ */
+- (int) doDepth: (char **) p1 end: (char **) p2
+{
+	char **p;
+	int d;
+	int l;
+
+	if(p2 == NULL)
+		return(0);
+	d = 0;
+	l = 0;
+	for(p=p1; p!=p2; p++) {
+		if(*p == NULL)
+			continue;
+		if(strcmp(*p, "(") == 0 || strcmp(*p, "{") == 0) {
+			l++;
+			continue;
+		}
+		if(strcmp(*p, ")") == 0 || strcmp(*p, "}") == 0) {
+			l--;
+			continue;
+		}
+		if(l != 0)
+			continue;
+		if([self wordIs: *p name: "do"])
+			d++;
+		else if([self wordIs: *p name: "end"])
+			d--;
+	}
+	return(d);
+}
+
+/*
+ * matchEnd
+ *	the END word closing the DO at p1, or 0 when the
+ *	range holds none; nested DO..END pairs are skipped
+ */
+- (char **) matchEnd: (char **) p1 end: (char **) p2
+{
+	char **p;
+	int dd;
+	int l;
+
+	dd = 0;
+	l = 0;
+	for(p=p1; p!=p2; p++) {
+		if(*p == NULL)
+			continue;
+		if(strcmp(*p, "(") == 0 || strcmp(*p, "{") == 0) {
+			l++;
+			continue;
+		}
+		if(strcmp(*p, ")") == 0 || strcmp(*p, "}") == 0) {
+			l--;
+			continue;
+		}
+		if(l != 0)
+			continue;
+		if([self wordIs: *p name: "do"])
+			dd++;
+		else if([self wordIs: *p name: "end"]) {
+			dd--;
+			if(dd == 0)
+				return(p);
+		}
+	}
+	return(0);
 }
 
 /*
@@ -1002,24 +1517,97 @@ static struct Keyword keyw[] = {
 	switch(k = [self srchx: p1[0]]) {
 
 	case TDECL:
+		if([self wordIs: p1[0] name: "declare"]) {
+			/* DECLARE name BYTE, DECLARE name ADDRESS */
+			if(n != 3) {
+				(*error)++;
+				return(0);
+			}
+			if([self srchx: p1[1]] != -1 || ![self nameOk: p1[1]]) {
+				(*error)++;
+				return(0);
+			}
+			t = [self tree];
+			if([self wordIs: p1[2] name: "byte"])
+				t->DTYP = TDECL;
+			else if([self wordIs: p1[2] name: "address"])
+				t->DTYP = TADDR;
+			else {
+				(*error)++;
+				return(0);
+			}
+			t->DARR[0] = p1[1];
+			return(t);
+		}
+		if(n != 2) {
+			(*error)++;
+			return(0);
+		}
+		if([self srchx: p1[1]] != -1 || ![self nameOk: p1[1]]) {
+			(*error)++;
+			return(0);
+		}
+		t = [self tree];
+		t->DTYP = TDECL;
+		t->DARR[0] = p1[1];
+		return(t);
+
 	case TADDR:
 		if(n != 2) {
 			(*error)++;
 			return(0);
 		}
+		if([self srchx: p1[1]] != -1 || ![self nameOk: p1[1]]) {
+			(*error)++;
+			return(0);
+		}
+		t = [self tree];
+		t->DTYP = TADDR;
+		t->DARR[0] = p1[1];
+		return(t);
+
+	case TDISABLE:
+	case TENABLE:
+	case THALT:
+		if(n != 1) {
+			(*error)++;
+			return(0);
+		}
 		t = [self tree];
 		t->DTYP = k;
-		t->DARR[0] = p1[1];
 		return(t);
 
 	case TIF:
 	case TWHILE:
 	case TELSE:
+	case TDO:
+	case TEND:
+	case TTHEN:
+	case TTO:
+	case TNOT:
+	case TBYTE:
+	case TAND2:
+	case TOR2:
+	case TXOR:
+	case TMOD:
+	case TADD:
+	case TSUB:
 		(*error)++;
 		return(0);
 	}
 	if((p1[0][0] >= '0' && p1[0][0] <= '9') ||
 	    (p1[0][0] == '-' && p1[0][1] >= '0' && p1[0][1] <= '9')) {
+		char *a, *b;
+
+		/* $ signs read for show in numbers are dropped */
+		a = p1[0];
+		b = p1[0];
+		while(*a) {
+			if(*a != '$')
+				*b++ = *a;
+			a++;
+		}
+		*b = '\0';
 		t = [self tree];
 		t->DTYP = TNUM;
 		t->DARR[0] = p1[0];
