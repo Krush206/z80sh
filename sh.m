@@ -40,14 +40,14 @@ main(int c, char *av[])
 }
 
 @implementation Shell
-+ (int) argumentCount: (int) c argumentVector: (char *[]) av
++ (int) argumentCount: (int) c argumentVector: (char **) av
 {
 	register id sh;
 	register char **v;
 	register id obj;
 	int f;
 
-	sh = class_create_instance(self);
+	sh = [self new];
 	(void) [sh getTreeCount];
 	(void) [sh getErrorValue];
 	(void) [sh getCurrentDollarPointer];
@@ -70,8 +70,6 @@ main(int c, char *av[])
 	(void) [sh getExecuteFlag];
 	(void) [sh getJumpBuffer];
 	(void) strcpy([sh getPIDPointer], [sh integerToASCII: getpid()]);
-	[sh setFunction: obj = [Function new]];
-	[obj setShell: sh];
 	v = av;
 	*[sh getPrompt] = "% ";
 	if(getuid() == 0)
@@ -151,7 +149,7 @@ loop:
 		}
 		if(*error != 0)
 			[self error: ERR_SYNTAX code: 255]; else
-			[self execute: t input: NULL output: NULL];
+			[self compileTree: t];
 	}
 }
 @end
