@@ -89,16 +89,20 @@ Precedence, highest first:
   compiler currently returns 1 and 0, which `IF` and
   `DO WHILE` test the same way. The `0FFH` convention
   is planned.
-- `NOT` binds as tightly as a unary operator today
-  (it tests `x == 0`); PL/M binds it below relations.
-  Planned.
+- `NOT` binds below relations, so `NOT a = b` reads
+  `NOT (a = b)`; like the old tight `NOT` it tests
+  `x == 0`. Supported.
 - The dot operator (`.variable`, `.(...)` array
   constructors): planned.
 
 `=` compares inside conditions and expressions but assigns
 at statement level, so `IF X = Y THEN ...` tests equality
 while `X = Y;` stores. Imbedded assignment `(x := y)` is
-planned.
+supported anywhere an expression parses, including
+conditions, call arguments and nested inside itself; a
+bare `x := y;` statement parses too, as it is
+unambiguous. The selector of `DO CASE` re-evaluates per
+branch, so prefer a variable there.
 
 ## Statements
 
@@ -110,7 +114,9 @@ planned.
 - `DO variable = e1 TO e2; ... END;`: supported for an
   already-declared byte variable, stepping by 1 while
   the variable is `<= e2`.
-- `DO CASE expression; ... END;`: planned.
+- `DO CASE expression; ... END;`: supported; runs the
+  statement numbered from 0 by the selector value, and
+  nothing when it is out of range.
 - `IF expression THEN stmt;` and
   `IF expression THEN stmt; ELSE stmt;`: supported.
   `ELSE` binds to the nearest open `IF`.
@@ -154,12 +160,15 @@ and `INTERRUPT n` handlers for `n` in 0–7.
 |---|---|
 | `INPUT(port)` | Supported: byte from an I/O port |
 | `OUTPUT(port) = expr` | Supported: byte to an I/O port |
-| `LOW`, `HIGH`, `DOUBLE` | Planned (need 16-bit values) |
-| `ROL`, `ROR`, `SHL`, `SHR` | Planned |
-| `SCL`, `SCR` (carry rotates) | Planned |
+| `LOW(expr)` | Supported: low byte, the value itself |
+| `HIGH(expr)` | Supported: high byte, always zero |
+| `DOUBLE(expr)` | Supported: zero-extended value itself |
+| `SHL(v, n)`, `SHR(v, n)` | Supported: shift by count, 0 keeps value |
+| `ROL(v, n)`, `ROR(v, n)` | Supported: rotate by count |
+| `SCL(v, n)`, `SCR(v, n)` | Supported: rotate through clear carry |
+| `TIME(n)` | Supported: about 100us per unit |
+| `DEC(a + b)`, `DEC(a PLUS b)` | Supported: `daa` after the addition |
 | `LENGTH`, `LAST` | Planned (need arrays) |
-| `TIME` (100us-per-unit delay) | Planned |
-| `DEC` (BCD adjust) | Planned |
 
 ## Predefined variables
 
@@ -179,7 +188,7 @@ never freed) and run the suite:
 
 The suite rebuilds the compiler and checks exit codes,
 diagnostics, emitted assembly and final image bytes for
-55 programs, including one rejection test per non-PL/M
+106 programs, including one rejection test per non-PL/M
 spelling (`int`, `==`, `!=`, `!`, `&&`, `||`, `&`, `|`,
 `^`, `%`, bare `WHILE`, `THEN`-less `IF`, `{`/`}`,
 `//` comments).
