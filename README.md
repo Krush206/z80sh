@@ -132,11 +132,19 @@ Supported today:
 
     DECLARE name BYTE;
     DECLARE name ADDRESS;
+    DECLARE name (size) BYTE;   arrays, subscripts 0..size-1
+
+Array elements read and write with `A(i)` for any byte
+index expression, nesting included. `LENGTH(A)` folds to
+the element count and `LAST(A)` to the highest subscript.
+Sizes take full PL/M numbers (`10`, `0AH`, `101B`, `1$0`);
+at most 255 elements, since subscripts are bytes. Bare
+array names are rejected in expressions, and `ADDRESS`
+arrays stay an error until 16-bit values exist.
 
 Planned, in this order:
 
     DECLARE (a, b, ...) BYTE;      group form
-    DECLARE name (n) BYTE;          arrays
     ... INITIAL(v, ...);            preset values
     DECLARE name DATA (...);        storage constants
     DECLARE name LITERALLY '...';   source substitution
@@ -168,7 +176,7 @@ and `INTERRUPT n` handlers for `n` in 0–7.
 | `SCL(v, n)`, `SCR(v, n)` | Supported: rotate through clear carry |
 | `TIME(n)` | Supported: about 100us per unit |
 | `DEC(a + b)`, `DEC(a PLUS b)` | Supported: `daa` after the addition |
-| `LENGTH`, `LAST` | Planned (need arrays) |
+| `LENGTH(A)`, `LAST(A)` | Supported: folded element count, highest subscript |
 
 ## Predefined variables
 
@@ -188,7 +196,7 @@ never freed) and run the suite:
 
 The suite rebuilds the compiler and checks exit codes,
 diagnostics, emitted assembly and final image bytes for
-106 programs, including one rejection test per non-PL/M
+127 programs, including one rejection test per non-PL/M
 spelling (`int`, `==`, `!=`, `!`, `&&`, `||`, `&`, `|`,
 `^`, `%`, bare `WHILE`, `THEN`-less `IF`, `{`/`}`,
 `//` comments).
