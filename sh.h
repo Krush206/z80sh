@@ -113,8 +113,6 @@ struct Tree {
 	char ***argp;
 	char ***eargp;
 	int *peekc;
-	int *gflg;
-	int *error;
 }
 + (int) argumentCount: (int) c argumentVector: (char **) av;
 - (void) main;
@@ -133,19 +131,19 @@ struct Tree {
 - (int) readCharacter;
 - (int) getCharacter;
 - (int) getRawCharacter;
+- (void) readQuoted: (int) q;
+- (void) endOfFile;
 @end
 
 @interface Shell (Parser)
 - (struct Tree *) syntax: (char **) p1 end: (char **) p2;
+- (struct Tree *) splitList: (char **) p1 at: (char **) p end: (char **) p2;
 - (struct Tree *) syn1: (char **) p1 end: (char **) p2;
-- (int) braceDepth: (char **) p1 end: (char **) p2;
 - (struct Tree *) statement: (char **) p1 end: (char **) p2;
 - (struct Tree *) headparse: (char **) p1 end: (char **) p2;
 - (struct Tree *) syn2: (char **) p1 end: (char **) p2;
 - (struct Tree *) syn3: (char **) p1 end: (char **) p2;
 - (struct Tree *) syn4: (char **) p1 end: (char **) p2;
-- (struct Tree *) syn5: (char **) p1 end: (char **) p2;
-- (struct Tree *) syn6: (char **) p1 end: (char **) p2;
 - (struct Tree *) syn7: (char **) p1 end: (char **) p2;
 - (struct Tree *) synxor: (char **) p1 end: (char **) p2;
 - (struct Tree *) syneq: (char **) p1 end: (char **) p2;
@@ -159,6 +157,12 @@ struct Tree {
 - (int) nameOk: (char *) na;
 - (int) doDepth: (char **) p1 end: (char **) p2;
 - (char **) matchEnd: (char **) p1 end: (char **) p2;
+- (char **) matchParen: (char **) p1 end: (char **) p2;
+- (char **) matchElse: (char **) p1 end: (char **) p2;
+- (char **) findSemi: (char **) p1 end: (char **) p2;
+- (char **) findTo: (char **) p1 end: (char **) p2;
+- (struct Tree *) call: (int) k args: (char **) lp end: (char **) rp;
+- (void) stripDollar: (char *) s;
 - (struct Tree *) doStatement: (char **) p1 end: (char **) p2;
 - (struct Tree *) tree;
 @end
@@ -167,7 +171,7 @@ struct Tree {
 - (void) printString: (const char *) as;
 - (void) putCharacter: (int) c;
 - (int) anyCharacter: (int) c in: (const char *) as;
-- (void) error: (const char *) s code: (int) exitno;
+- (void) error: (const char *) s code: (int) code;
 - (char *) integerToASCII: (int) n;
 - (int *) getTreeCount;
 - (int *) getErrorValue;
@@ -176,8 +180,6 @@ struct Tree {
 - (char ***) getArgumentPointer;
 - (char ***) getEndArgumentPointer;
 - (int *) getPeekCharacter;
-- (int *) getGlobFlag;
-- (int *) getError;
 - (int *) getLabelCount;
 - (int *) getSymbolCount;
 - (int *) getScope;
