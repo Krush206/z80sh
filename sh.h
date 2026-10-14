@@ -64,6 +64,16 @@
 #define TLENGTH 53
 #define TLAST 54
 #define TARRAY 55
+#define TGOTO 56
+#define TGO 57
+#define TLABEL 58
+#define TCALL 59
+#define TPROCEDURE 60
+#define TRETURN 61
+#define TDATA 62
+#define TINITIAL 63
+#define TLITERAL 64
+#define TINTERRUPT 65
 #define TMUL 20
 #define TDIV 21
 #define TMOD 22
@@ -80,6 +90,11 @@
 #define SYMSIZ 50
 #define SYMNAMSIZ 32
 #define SYMLABSIZ 48
+#define MACSIZ 32
+#define MACVSIZ 64
+#define LABSIZ 32
+#define PROCSIZ 16
+#define MAXPARS 16
 #define ORGADR 0
 #define RAMSTART 0xC000
 #define RAMSIZE 0x2000
@@ -118,6 +133,15 @@ struct Tree {
 	char symlab[SYMSIZ][SYMLABSIZ];
 	int symadr[SYMSIZ];
 	int symsiz[SYMSIZ];
+	char macnam[MACSIZ][SYMNAMSIZ];
+	char macval[MACSIZ][MACVSIZ];
+	int maclev[MACSIZ];
+	char labnam[LABSIZ][SYMNAMSIZ];
+	int labdef[LABSIZ];
+	char prcnam[PROCSIZ][SYMNAMSIZ];
+	int prcnpar[PROCSIZ];
+	int prcadr[PROCSIZ][MAXPARS];
+	int prcret[PROCSIZ];
 	int *symc;
 	int *ramc;
 	int *scope;
@@ -130,6 +154,10 @@ struct Tree {
 	char ***argp;
 	char ***eargp;
 	int *peekc;
+	int *macc;
+	int *labc;
+	int *prcc;
+	int *inProc;
 }
 + (int) argumentCount: (int) c argumentVector: (char **) av;
 - (void) main;
@@ -192,6 +220,7 @@ struct Tree {
 - (char **) findAssign: (char **) p1 end: (char **) p2;
 - (int) numberValue: (char *) s;
 - (struct Tree *) arrayDecl: (char **) p1 args: (char **) lp end: (char **) rp;
+- (struct Tree *) groupDecl: (char **) p1 args: (char **) lp end: (char **) rp;
 - (struct Tree *) subscript: (char *) na args: (char **) lp end: (char **) rp;
 - (struct Tree *) arrayInfo: (int) k args: (char **) lp end: (char **) rp;
 - (void) stripDollar: (char *) s;
@@ -217,5 +246,9 @@ struct Tree {
 - (int *) getScope;
 - (int *) getRamPointer;
 - (int *) getOrgFlag;
+- (int *) getMacroCount;
+- (int *) getLabCount;
+- (int *) getProcCount;
+- (int *) getInProc;
 @end
 #endif /* !SH_H */
