@@ -54,8 +54,6 @@ main(int c, char *av[])
 	(void) [sh getArgumentPointer];
 	(void) [sh getEndArgumentPointer];
 	(void) [sh getPeekCharacter];
-	(void) [sh getGlobFlag];
-	(void) [sh getError];
 	(void) [sh getLabelCount];
 	(void) [sh getSymbolCount];
 	(void) [sh getScope];
@@ -86,20 +84,12 @@ loop:
 	*eargp = args+ARGSIZ-1;
 	*linep = line;
 	*elinep = line+LINSIZ-1;
-	*error = 0;
-	*gflg = 0;
 	do {
 		cp = *linep;
 		[self word];
-	} while(*cp != '\n' || [self braceDepth: args end: *argp] > 0 ||
-	    [self doDepth: args end: *argp] > 0);
+	} while(*cp != '\n' || [self doDepth: args end: *argp] > 0);
 	*treec = 0;
-	if(*gflg == 0) {
-		if(*error == 0)
-			t = [self syntax: args end: *argp];
-		if(*error != 0)
-			[self error: ERR_SYNTAX code: 255]; else
-			[self compileTree: t];
-	}
+	t = [self syntax: args end: *argp];
+	[self compileTree: t];
 }
 @end
