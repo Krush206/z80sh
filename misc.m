@@ -171,4 +171,32 @@
 
 	return orgflg = &ret;
 }
+
+- (int *) getMacroCount
+{
+	static int ret;
+
+	return macc = &ret;
+}
+
+- (int *) getLabCount
+{
+	static int ret;
+
+	return labc = &ret;
+}
+
+- (int *) getProcCount
+{
+	static int ret;
+
+	return prcc = &ret;
+}
+
+- (int *) getInProc
+{
+	static int ret;
+
+	return inProc = &ret;
+}
 @end
