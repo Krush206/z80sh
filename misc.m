@@ -62,12 +62,12 @@
 	return(0);
 }
 
-- (void) error: (const char *) s code: (int) exitno
+- (void) error: (const char *) s code: (int) code
 {
 	[self printString: s];
 	[self printString: "\n"];
 	lseek(0, (off_t) 0, SEEK_END);
-	exit(exitno);
+	exit(code);
 }
 
 - (char *) integerToASCII: (int) n
@@ -135,20 +135,6 @@
 	static int ret;
 
 	return peekc = &ret;
-}
-
-- (int *) getGlobFlag
-{
-	static int ret;
-
-	return gflg = &ret;
-}
-
-- (int *) getError
-{
-	static int ret;
-
-	return error = &ret;
 }
 
 - (int *) getLabelCount
