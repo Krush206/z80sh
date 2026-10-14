@@ -8,6 +8,11 @@
 # compiler exit code, stderr diagnostics, the emitted assembly
 # on stdout, and (where asked) that z80asm assembles the output
 # or that the final image has the right size and header bytes.
+#
+# The language is PL/M only: DECLARE, DO..END, IF..THEN,
+# word operators, = and <>. C-like spellings (int, address
+# statements, ==, !=, !, &&, ||, &, |, ^, %, braces, bare
+# while/if, // comments) are rejected with a syntax error.
 
 set -u
 
@@ -145,82 +150,78 @@ t_rom() {
 	pass "$name"
 }
 
-# --- classic engine behaviour --------------------------------
+# --- declarations, arithmetic, scope -------------------------
 
-t_ok classic-arith <<'EOF'
-int a = 2
-int b = 3
-int c = a + b * 4 - a / b % 3
+t_ok decl-arith <<'EOF'
+DECLARE A BYTE
+DECLARE B BYTE
+DECLARE C BYTE
+A = 2
+B = 3
+C = A + B * 4 - A / B MOD 3
 EOF
 
-t_ok classic-stmts <<'EOF'
-int x = 3
-while (x) {
-x = x - 1;
-}
-if (x == 0) {
-x = 42;
-} else {
-x = 7;
-}
+t_ok decl-unspaced <<'EOF'
+DECLARE X BYTE
+X=5
+DECLARE Y BYTE
+Y=X*2+1
 EOF
 
-t_ok classic-c-operators <<'EOF'
-int x = 1
-int y = 2
-if (x == 1 && y != 2 || x < 3) x = 9
+t_grep decl-char-literal "ld a, 65" <<'EOF'
+DECLARE C BYTE
+C = 'A'
 EOF
 
-t_ok classic-scope <<'EOF'
-int x = 1
-{
-int x = 2
-int y = x
-}
-int z = x
+t_ok decl-block-scope <<'EOF'
+DECLARE X BYTE
+X = 1
+DO;
+DECLARE X BYTE
+DECLARE Y BYTE
+Y = X
+END;
+DECLARE Z BYTE
+Z = X
 EOF
 
-t_ok classic-deref <<'EOF'
-address p
-int v = 65
-*p = v
-int w = *p
+t_ok decl-address-deref <<'EOF'
+DECLARE P ADDRESS
+DECLARE V BYTE
+DECLARE W BYTE
+V = 65
+*P = V
+W = *P
 EOF
 
-t_ok classic-io <<'EOF'
-int x = input (220)
-output (191) = x
+t_ok decl-io <<'EOF'
+DECLARE X BYTE
+X = INPUT (220)
+OUTPUT (191) = X
 EOF
 
-t_ok classic-unspaced <<'EOF'
-int x=5
-int y=x*2+1
+t_grep decl-io-upper "in a, \(c\)" "out \(c\), a" <<'EOF'
+DECLARE X BYTE
+X = INPUT (220)
+OUTPUT (191) = X
 EOF
 
-t_grep classic-char-literal "ld a, 65" <<'EOF'
-int c = 'A'
+t_err decl-redeclared 255 "redeclared" <<'EOF'
+DECLARE X BYTE
+DECLARE X BYTE
 EOF
 
-t_err classic-redeclared 255 "redeclared" <<'EOF'
-int x = 1
-int x = 2
+t_err decl-undeclared 255 "undeclared" <<'EOF'
+DECLARE Y BYTE
+Y = Z
 EOF
 
-t_err classic-undeclared 255 "undeclared" <<'EOF'
-int y = z
-EOF
-
-t_err classic-unclosed-brace 255 "syntax error" <<'EOF'
-{
-int x = 1;
-EOF
-
-# --- PL/M case-insensitivity and $ handling ------------------
+# --- case-insensitivity and $ handling -----------------------
 
 t_grep plm-uppercase "ld a, 5" "ld \(x\), a" <<'EOF'
-INT X = 5
-X = X + 1
-IF (X == 6) OUTPUT (191) = X
+DECLARE X BYTE
+X = 5
+IF X = 5 THEN OUTPUT (191) = X
 EOF
 
 t_grep plm-dollar-declare "linecount:.equ" <<'EOF'
@@ -230,109 +231,133 @@ LINE$COUNT = LINECOUNT + 1
 EOF
 
 t_err plm-dollar-dup 255 "redeclared" <<'EOF'
-int a$b = 1
-int ab = 2
+DECLARE A$B BYTE
+DECLARE AB BYTE
 EOF
 
 t_err plm-case-dup 255 "redeclared" <<'EOF'
-int x = 1
-INT X = 2
-EOF
-
-t_grep plm-declare-forms "i:.equ" "x:.equ" <<'EOF'
-DECLARE I ADDRESS
 DECLARE X BYTE
-X = 1
+DECLARE X BYTE
 EOF
 
 t_grep plm-number-dollar "ld a, 10$" <<'EOF'
-int a = 1$0
+DECLARE A BYTE
+A = 1$0
 EOF
 
 t_grep plm-number-hex "ld a, 0FFH" "ld a, 101B" <<'EOF'
-int h = 0FFH
-int b = 101B
+DECLARE H BYTE
+H = 0FFH
+DECLARE B BYTE
+B = 101B
+EOF
+
+t_ok plm-star-comment <<'EOF'
+/* greetings */
+DECLARE X BYTE
+X = 1 /* trailing */
 EOF
 
 # --- PL/M word operators and comparisons --------------------
 
 t_ok plm-word-operators <<'EOF'
-int a = 1 AND 0
-int o = 1 OR 0
-int x = 1 XOR 1
-int m = 7 MOD 3
-int p = 1 PLUS 2
-int s = 5 MINUS 2
-int n = NOT 0
+DECLARE A BYTE
+DECLARE O BYTE
+DECLARE X BYTE
+DECLARE M BYTE
+DECLARE P BYTE
+DECLARE S BYTE
+DECLARE N BYTE
+A = 1 AND 0
+O = 1 OR 0
+X = 1 XOR 1
+M = 7 MOD 3
+P = 1 PLUS 2
+S = 5 MINUS 2
+N = NOT 0
 EOF
 
 t_grep plm-and-is-logical "or a" "jr z" <<'EOF'
-int a = 1 AND 0
+DECLARE A BYTE
+A = 1 AND 0
 EOF
 
 t_grep plm-or-is-logical "or a" "jr nz" <<'EOF'
-int o = 1 OR 0
-EOF
-
-t_grep plm-bitwise-and-or "and b" "or b" <<'EOF'
-int a = 5 & 3
-int o = 5 | 3
+DECLARE O BYTE
+O = 1 OR 0
 EOF
 
 t_grep plm-not-compares "cp b" <<'EOF'
-int n = NOT 0
+DECLARE N BYTE
+N = NOT 0
 EOF
 
 t_grep plm-equals-compares "cp b" <<'EOF'
-int x = 5
-int y = 5
+DECLARE X BYTE
+DECLARE Y BYTE
+X = 5
+Y = 5
 IF X = Y THEN X = 1
 EOF
 
+t_grep plm-relational "cp b" <<'EOF'
+DECLARE X BYTE
+DECLARE Y BYTE
+X = 5
+Y = 6
+IF X < Y THEN X = 1
+IF X <= Y THEN X = 2
+IF X > Y THEN X = 3 ELSE X = 4
+IF X >= Y THEN X = 5 ELSE X = 6
+IF X <> Y THEN X = 7
+EOF
+
 t_grep plm-not-equals "jr nz" <<'EOF'
-int x = 5
-int y = 6
-IF (x <> y) x = 2
+DECLARE X BYTE
+DECLARE Y BYTE
+X = 5
+Y = 6
+IF (X <> Y) THEN X = 2
 EOF
 
 t_err plm-reserved-name 255 "syntax error" <<'EOF'
-int and = 1
+DECLARE AND BYTE
+EOF
+
+t_err plm-declare-bad-type 255 "syntax error" <<'EOF'
+DECLARE X INT
+EOF
+
+t_err plm-declare-short 255 "syntax error" <<'EOF'
+DECLARE X
 EOF
 
 # --- PL/M statements -----------------------------------------
 
 t_ok plm-if-then-else <<'EOF'
-int x = 1
+DECLARE X BYTE
+X = 1
 IF X = 1 THEN X = 2 ELSE X = 3
-if (x == 2) then x = 4
-EOF
-
-t_ok plm-if-same-line-else <<'EOF'
-int x = 5
-IF X = 5 THEN OUTPUT (191) = X ELSE OUTPUT (191) = 0
-EOF
-
-t_ok plm-if-brace-wrapped-else <<'EOF'
-int x = 5
-{
-IF X = 5 THEN X = 1;
-ELSE X = 2;
-}
+IF (X = 2) THEN X = 4
 EOF
 
 t_ok plm-nested-if <<'EOF'
-int x = 1
-int y = 2
+DECLARE X BYTE
+DECLARE Y BYTE
+X = 1
+Y = 2
 IF X = 1 THEN IF Y = 2 THEN X = 3 ELSE X = 4 ELSE X = 5
 EOF
 
 t_err plm-if-without-then 255 "syntax error" <<'EOF'
-int x = 1
+DECLARE X BYTE
+X = 1
 IF X = 1 X = 2
 EOF
 
 t_ok plm-do-block <<'EOF'
-int x = 0
+DECLARE X BYTE
+X = 0
 DO;
 X = 1;
 X = X + 1;
@@ -340,7 +365,8 @@ END;
 EOF
 
 t_ok plm-do-while <<'EOF'
-int x = 3
+DECLARE X BYTE
+X = 3
 DO WHILE X;
 X = X - 1;
 END;
@@ -356,7 +382,8 @@ END;
 EOF
 
 t_ok plm-nested-do <<'EOF'
-int x = 0
+DECLARE X BYTE
+X = 0
 DO;
 DO;
 X = 1;
@@ -371,24 +398,124 @@ X = 1;
 EOF
 
 t_err plm-do-while-nosemi 255 "syntax error" <<'EOF'
-int x = 1
-do while x
-x = 2;
-end;
+DECLARE X BYTE
+X = 1
+DO WHILE X
+X = 2;
+END;
 EOF
 
 t_err plm-bare-end 255 "syntax error" <<'EOF'
-end
+END
 EOF
 
 t_err plm-bare-to 255 "syntax error" <<'EOF'
-to
+TO
 EOF
 
 t_grep plm-disable-enable-halt "di$" "ei$" "halt$" <<'EOF'
 DISABLE;
 ENABLE;
 HALT;
+EOF
+
+# --- removed C-like spellings all fail -----------------------
+
+t_err rm-int-decl 255 "syntax error" <<'EOF'
+int x = 1
+EOF
+
+t_err rm-address-stmt 255 "syntax error" <<'EOF'
+address p
+EOF
+
+t_err rm-eqeq 255 "syntax error" <<'EOF'
+DECLARE X BYTE
+X = 1
+IF X == 1 THEN X = 2
+EOF
+
+t_err rm-noteq 255 "syntax error" <<'EOF'
+DECLARE X BYTE
+X = 1
+IF X != 1 THEN X = 2
+EOF
+
+t_err rm-bang 255 "syntax error" <<'EOF'
+DECLARE Y BYTE
+Y = !0
+EOF
+
+t_err rm-andand 255 "syntax error" <<'EOF'
+DECLARE A BYTE
+DECLARE B BYTE
+A = 1
+B = A && 1
+EOF
+
+t_err rm-oror 255 "syntax error" <<'EOF'
+DECLARE A BYTE
+DECLARE B BYTE
+A = 1
+B = A || 1
+EOF
+
+t_err rm-bitand 255 "syntax error" <<'EOF'
+DECLARE A BYTE
+DECLARE B BYTE
+A = 5
+B = A & 3
+EOF
+
+t_err rm-bitor 255 "syntax error" <<'EOF'
+DECLARE A BYTE
+DECLARE O BYTE
+A = 5
+O = A | 3
+EOF
+
+t_err rm-caret 255 "syntax error" <<'EOF'
+DECLARE A BYTE
+DECLARE X BYTE
+A = 5
+X = A ^ 3
+EOF
+
+t_err rm-percent 255 "syntax error" <<'EOF'
+DECLARE A BYTE
+DECLARE M BYTE
+A = 7
+M = A % 3
+EOF
+
+t_err rm-c-while 255 "syntax error" <<'EOF'
+DECLARE X BYTE
+X = 3
+WHILE (X) X = X - 1
+EOF
+
+t_err rm-c-if-paren 255 "syntax error" <<'EOF'
+DECLARE X BYTE
+X = 1
+IF (X = 1) X = 2
+EOF
+
+t_err rm-braces 255 "syntax error" <<'EOF'
+DECLARE X BYTE
+{ X = 1; }
+EOF
+
+t_err rm-brace-block 255 "syntax error" <<'EOF'
+DECLARE X BYTE
+X = 0
+{
+X = 1;
+}
+EOF
+
+t_err rm-line-comment 255 "syntax error" <<'EOF'
+DECLARE X BYTE // comment
+X = 1
 EOF
 
 # --- full image ----------------------------------------------
