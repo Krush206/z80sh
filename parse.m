@@ -46,22 +46,34 @@ static struct Keyword keyw[] = {
 	{ "address", TADDR },
 	{ "and", TAND2 },
 	{ "byte", TBYTE },
+	{ "case", TCASE },
+	{ "dec", TDEC },
 	{ "declare", TDECL },
 	{ "disable", TDISABLE },
 	{ "do", TDO },
+	{ "double", TDOUBLE },
 	{ "else", TELSE },
 	{ "enable", TENABLE },
 	{ "end", TEND },
 	{ "halt", THALT },
+	{ "high", THIGH },
 	{ "if", TIF },
 	{ "input", TINPUT },
+	{ "low", TLOW },
 	{ "minus", TSUB },
 	{ "mod", TMOD },
 	{ "not", TNOT },
 	{ "or", TOR2 },
 	{ "output", TOUTPUT },
 	{ "plus", TADD },
+	{ "rol", TROL },
+	{ "ror", TROR },
+	{ "scl", TSCL },
+	{ "scr", TSCR },
+	{ "shl", TSHL },
+	{ "shr", TSHR },
 	{ "then", TTHEN },
+	{ "time", TTIME },
 	{ "to", TTO },
 	{ "while", TWHILE },
 	{ "xor", TXOR }
@@ -434,6 +446,112 @@ static struct Keyword keyw[] = {
 }
 
 /*
+ * skipSep
+ *	first non-separator word in the range, or the end
+ */
+- (char **) skipSep: (char **) p1 end: (char **) p2
+{
+	char **p;
+
+	for(p = p1; p != p2; p++) {
+		if(strcmp(*p, ";") != 0 && strcmp(*p, "\n") != 0)
+			return(p);
+	}
+	return(p2);
+}
+
+/*
+ * splitCase
+ *	each DO CASE branch parsed into stmts, returning the
+ *	count or -1 after reporting overflow; separators in
+ *	nested groups never split
+ */
+- (int) splitCase: (char **) p1 end: (char **) p2 into: (struct Tree **) stmts
+{
+	char **q, **seg;
+	int k, l, dd;
+
+	k = 0;
+	seg = [self skipSep: p1 end: p2];
+	l = 0;
+	dd = 0;
+	q = seg;
+	while(q != p2) {
+		if(strcmp(*q, "(") == 0) {
+			l++;
+			q++;
+			continue;
+		}
+		if(strcmp(*q, ")") == 0) {
+			l--;
+			q++;
+			continue;
+		}
+		if(l != 0) {
+			q++;
+			continue;
+		}
+		if([self wordIs: *q name: "do"]) {
+			dd++;
+			q++;
+			continue;
+		}
+		if([self wordIs: *q name: "end"]) {
+			dd--;
+			q++;
+			continue;
+		}
+		if(dd != 0 || (strcmp(*q, ";") != 0 &&
+		    strcmp(*q, "\n") != 0)) {
+			q++;
+			continue;
+		}
+		if(k == ARGSIZ) {
+			[self error: ERR_LARGE code: 255];
+			return(-1);
+		}
+		stmts[k++] = [self syn1: seg end: q];
+		seg = [self skipSep: q+1 end: p2];
+		q = seg;
+	}
+	if(seg == p2)
+		return(k);
+	if(k == ARGSIZ) {
+		[self error: ERR_LARGE code: 255];
+		return(-1);
+	}
+	stmts[k++] = [self syn1: seg end: p2];
+	return(k);
+}
+
+/*
+ * findAssign
+ *	the first := at depth zero in the range, or 0 when
+ *	there is none
+ */
+- (char **) findAssign: (char **) p1 end: (char **) p2
+{
+	char **q;
+	int l;
+
+	l = 0;
+	for(q = p1; q != p2; q++) {
+		if(strcmp(*q, "(") == 0) {
+			l++;
+			continue;
+		}
+		if(strcmp(*q, ")") == 0) {
+			l--;
+			continue;
+		}
+		if(l != 0 || strcmp(*q, ":=") != 0)
+			continue;
+		return(q);
+	}
+	return(0);
+}
+
+/*
  * doStatement
  *	DO; syn1 END
  *	DO WHILE syn3; syn1 END
@@ -452,6 +570,9 @@ static struct Keyword keyw[] = {
 	struct Tree *t, *e1, *e2, *body;
 	struct Tree *v1, *v2, *v3, *v4, *n1;
 	struct Tree *init, *cond, *incr, *incv, *loop, *lbody, *root;
+	struct Tree *sel, *tail, *cmp, *num, *br;
+	struct Tree *stmts[ARGSIZ];
+	int k, i;
 
 	m = [self matchEnd: p1 end: p2];
 	if(m == 0) {
@@ -480,6 +601,38 @@ static struct Keyword keyw[] = {
 		while(q != m && (strcmp(*q, ";") == 0 || strcmp(*q, "\n") == 0))
 			q++;
 		t->DRIT = [self syn1: q end: m];
+		return(t);
+	}
+	if(p != m && [self wordIs: *p name: "case"]) {
+		semi = [self findSemi: p+1 end: m];
+		if(semi == 0) {
+			[self error: ERR_SYNTAX code: 255];
+			return(0);
+		}
+		sel = [self syn3: p+1 end: semi];
+		k = [self splitCase: semi+1 end: m into: stmts];
+		if(k < 0)
+			return(0);
+		tail = 0;
+		i = k;
+		while(i > 0) {
+			i--;
+			cmp = [self tree];
+			cmp->DTYP = TEQU;
+			cmp->DLEF = sel;
+			num = [self tree];
+			num->DTYP = TNUM;
+			num->DARR[0] = strdup([self integerToASCII: i]);
+			cmp->DRIT = num;
+			br = [self tree];
+			br->DTYP = TIF;
+			br->DLEF = cmp;
+			br->DRIT = stmts[i];
+			br->DSTR = tail;
+			tail = br;
+		}
+		t->DTYP = TBLOCK;
+		t->DLEF = tail;
 		return(t);
 	}
 	if(p != m && strcmp(*p, ";") != 0 && strcmp(*p, "\n") != 0 &&
@@ -600,16 +753,28 @@ static struct Keyword keyw[] = {
  * syn3
  *	syn4
  *	syn3 OR syn4
+ *	syn3 XOR syn4
+ *
+ * OR and XOR share the lowest level, after PL/M-80
  */
 - (struct Tree *) syn3: (char **) p1 end: (char **) p2
 {
 	register char **p;
 	register struct Tree *t;
 	char **q;
-	int l;
+	int l, qc, k2;
 
 	l = 0;
 	q = 0;
+	qc = 0;
+	q = [self findAssign: p1 end: p2];
+	if(q != 0) {
+		t = [self tree];
+		t->DTYP = TASG;
+		t->DLEF = [self syn3: p1 end: q];
+		t->DRIT = [self syn2: q+1 end: p2];
+		return(t);
+	}
 	for(p=p1; p!=p2; p++)
 	switch(**p) {
 
@@ -623,13 +788,18 @@ static struct Keyword keyw[] = {
 
 
 	default:
-		if(l == 0 && [self srchx: *p] == TOR2)
-			q = p;
+		if(l != 0)
+			continue;
+		k2 = [self srchx: *p];
+		if(k2 != TOR2 && k2 != TXOR)
+			continue;
+		qc = k2;
+		q = p;
 		continue;
 	}
 	if(q != 0) {
 		t = [self tree];
-		t->DTYP = TOR2;
+		t->DTYP = qc;
 		t->DLEF = [self syn3: p1 end: q];
 		t->DRIT = [self syn4: q+1 end: p2];
 		return(t);
@@ -642,8 +812,8 @@ static struct Keyword keyw[] = {
 
 /*
  * syn4
- *	synxor
- *	syn4 AND synxor
+ *	synnot
+ *	syn4 AND synnot
  */
 - (struct Tree *) syn4: (char **) p1 end: (char **) p2
 {
@@ -675,57 +845,38 @@ static struct Keyword keyw[] = {
 		t = [self tree];
 		t->DTYP = TAND2;
 		t->DLEF = [self syn4: p1 end: q];
-		t->DRIT = [self synxor: q+1 end: p2];
+		t->DRIT = [self synnot: q+1 end: p2];
 		return(t);
 	}
 	if(l == 0)
-		return [self synxor: p1 end: p2];
+		return [self synnot: p1 end: p2];
 	[self error: ERR_SYNTAX code: 255];
 	return(0);
 }
 
 /*
- * synxor
+ * synnot
  *	syneq
- *	synxor XOR syneq
+ *	NOT synnot
+ *
+ * NOT binds below relations, so NOT a = b reads NOT (a = b);
+ * like the old tight NOT it tests x == 0, needing no new
+ * node type
  */
-- (struct Tree *) synxor: (char **) p1 end: (char **) p2
+- (struct Tree *) synnot: (char **) p1 end: (char **) p2
 {
-	register char **p;
-	register struct Tree *t;
-	char **q;
-	int l;
+	struct Tree *t, *t1;
 
-	l = 0;
-	q = 0;
-	for(p=p1; p!=p2; p++)
-	switch(**p) {
-
-	case '(':
-		l++;
-		continue;
-
-	case ')':
-		l--;
-		continue;
-
-
-	default:
-		if(l == 0 && [self srchx: *p] == TXOR)
-			q = p;
-		continue;
-	}
-	if(q != 0) {
-		t = [self tree];
-		t->DTYP = TXOR;
-		t->DLEF = [self synxor: p1 end: q];
-		t->DRIT = [self syneq: q+1 end: p2];
-		return(t);
-	}
-	if(l == 0)
+	if(p1 == p2 || ![self wordIs: *p1 name: "not"])
 		return [self syneq: p1 end: p2];
-	[self error: ERR_SYNTAX code: 255];
-	return(0);
+	t = [self tree];
+	t->DTYP = TEQU;
+	t->DLEF = [self synnot: p1+1 end: p2];
+	t1 = [self tree];
+	t1->DTYP = TNUM;
+	t1->DARR[0] = "0";
+	t->DRIT = t1;
+	return(t);
 }
 
 /*
@@ -1015,10 +1166,10 @@ static struct Keyword keyw[] = {
  *	syn7
  *	- synun
  *	+ synun
- *	NOT synun
+ *	* synun
  *
- * unary minus is 0 - x, logical not is x == 0, so no
- * new node types are needed for them
+ * unary minus is 0 - x, so no new node type is needed;
+ * NOT lives at its own level in synnot
  */
 - (struct Tree *) synun: (char **) p1 end: (char **) p2
 {
@@ -1038,16 +1189,6 @@ static struct Keyword keyw[] = {
 		}
 		if(strcmp(*p1, "+") == 0)
 			return [self synun: p1+1 end: p2];
-		if([self wordIs: *p1 name: "not"]) {
-			t = [self tree];
-			t->DTYP = TEQU;
-			t->DLEF = [self synun: p1+1 end: p2];
-			t1 = [self tree];
-			t1->DTYP = TNUM;
-			t1->DARR[0] = "0";
-			t->DRIT = t1;
-			return(t);
-		}
 		if(strcmp(*p1, "*") == 0) {
 			t = [self tree];
 			t->DTYP = TDEREF;
@@ -1226,6 +1367,61 @@ static struct Keyword keyw[] = {
 }
 
 /*
+ * findComma
+ *	first comma at depth zero in the range, or 0 when
+ *	there is none
+ */
+- (char **) findComma: (char **) p1 end: (char **) p2
+{
+	char **q;
+	int l;
+
+	l = 0;
+	for(q = p1; q != p2; q++) {
+		if(strcmp(*q, "(") == 0) {
+			l++;
+			continue;
+		}
+		if(strcmp(*q, ")") == 0) {
+			l--;
+			continue;
+		}
+		if(l != 0 || strcmp(*q, ",") != 0)
+			continue;
+		return(q);
+	}
+	return(0);
+}
+
+/*
+ * findPlus
+ *	first + or PLUS at depth zero in the range, or 0
+ */
+- (char **) findPlus: (char **) p1 end: (char **) p2
+{
+	char **q;
+	int l;
+
+	l = 0;
+	for(q = p1; q != p2; q++) {
+		if(strcmp(*q, "(") == 0) {
+			l++;
+			continue;
+		}
+		if(strcmp(*q, ")") == 0) {
+			l--;
+			continue;
+		}
+		if(l != 0)
+			continue;
+		if((**q == '+' && (*q)[1] == '\0') ||
+		    [self wordIs: *q name: "plus"])
+			return(q);
+	}
+	return(0);
+}
+
+/*
  * call
  *	an INPUT or OUTPUT node around the argument syntax
  */
@@ -1235,7 +1431,62 @@ static struct Keyword keyw[] = {
 
 	t = [self tree];
 	t->DTYP = k;
+	if([self findComma: lp end: rp] != 0) {
+		[self error: ERR_SYNTAX code: 255];
+		return(0);
+	}
 	t->DLEF = [self syn2: lp end: rp];
+	return(t);
+}
+
+/*
+ * call2
+ *	a two-argument built-in node split on the depth-zero
+ *	comma, so nested calls keep working
+ */
+- (struct Tree *) call2: (int) k args: (char **) lp end: (char **) rp
+{
+	struct Tree *t;
+	char **q;
+
+	t = [self tree];
+	t->DTYP = k;
+	q = [self findComma: lp end: rp];
+	if(q == 0) {
+		[self error: ERR_SYNTAX code: 255];
+		return(0);
+	}
+	t->DLEF = [self syn2: lp end: q];
+	if([self findComma: q+1 end: rp] != 0) {
+		[self error: ERR_SYNTAX code: 255];
+		return(0);
+	}
+	t->DRIT = [self syn2: q+1 end: rp];
+	return(t);
+}
+
+/*
+ * callDec
+ *	DEC(a + b) or DEC(a PLUS b) as an addition subtree
+ *	ready for the decimal adjust
+ */
+- (struct Tree *) callDec: (char **) lp end: (char **) rp
+{
+	struct Tree *t, *add;
+	char **q;
+
+	t = [self tree];
+	t->DTYP = TDEC;
+	q = [self findPlus: lp end: rp];
+	if(q == 0) {
+		[self error: ERR_SYNTAX code: 255];
+		return(0);
+	}
+	add = [self tree];
+	add->DTYP = TADD;
+	add->DLEF = [self synadd: lp end: q];
+	add->DRIT = [self synmul: q+1 end: rp];
+	t->DLEF = add;
 	return(t);
 }
 
@@ -1305,8 +1556,14 @@ static struct Keyword keyw[] = {
 			k = [self srchx: p1[0]];
 		else
 			k = -1;
-		if(k == TINPUT || k == TOUTPUT)
+		if(k == TINPUT || k == TOUTPUT || k == TLOW ||
+		    k == THIGH || k == TDOUBLE || k == TTIME)
 			return [self call: k args: lp end: rp];
+		if(k == TSHL || k == TSHR || k == TROL ||
+		    k == TROR || k == TSCL || k == TSCR)
+			return [self call2: k args: lp end: rp];
+		if(k == TDEC)
+			return [self callDec: lp end: rp];
 		if(n != 0)
 			[self error: ERR_SYNTAX code: 255];
 		t = [self tree];
@@ -1362,6 +1619,7 @@ static struct Keyword keyw[] = {
 	case TELSE:
 	case TDO:
 	case TEND:
+	case TCASE:
 	case TTHEN:
 	case TTO:
 	case TNOT:
@@ -1372,11 +1630,26 @@ static struct Keyword keyw[] = {
 	case TMOD:
 	case TADD:
 	case TSUB:
+	case TSHL:
+	case TSHR:
+	case TROL:
+	case TROR:
+	case TSCL:
+	case TSCR:
+	case TTIME:
+	case TDEC:
+	case TLOW:
+	case THIGH:
+	case TDOUBLE:
 		[self error: ERR_SYNTAX code: 255];
 		return(0);
 	}
 	if((p1[0][0] >= '0' && p1[0][0] <= '9') ||
 	    (p1[0][0] == '-' && p1[0][1] >= '0' && p1[0][1] <= '9')) {
+		if(n != 1) {
+			[self error: ERR_SYNTAX code: 255];
+			return(0);
+		}
 		/* $ signs read for show in numbers are dropped */
 		[self stripDollar: p1[0]];
 		t = [self tree];
@@ -1384,7 +1657,7 @@ static struct Keyword keyw[] = {
 		t->DARR[0] = p1[0];
 		return(t);
 	}
-	if([self anyCharacter: p1[0][0] in: "=|&^<>!+-*/%~{}"]) {
+	if([self anyCharacter: p1[0][0] in: ",=|&^<>!+-*/%~{}:"]) {
 		[self error: ERR_SYNTAX code: 255];
 		return(0);
 	}
@@ -1403,7 +1676,6 @@ static struct Keyword keyw[] = {
 {
 	if(*treec == TRESIZ) {
 		[self error: "Command line overflow" code: 255];
-		exit(255);
 	}
 	return(&trebuf[(*treec)++]);
 }
