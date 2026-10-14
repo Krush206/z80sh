@@ -954,6 +954,100 @@ DECLARE A(4) BYTE; DECLARE X BYTE; X = A(0)
 DECLARE Y BYTE; Y = LENGTH(A)
 EOF
 
+t_ok decl-group <<'EOF'
+DECLARE (A, B, C) BYTE
+A = 1
+B = 2
+C = A + B
+EOF
+
+t_ok decl-group-address <<'EOF'
+DECLARE (P, Q) ADDRESS
+P = 5
+EOF
+
+t_grep decl-group-ram "b:.equ 0xC001" "c:.equ 0xC002" <<'EOF'
+DECLARE (A, B, C) BYTE
+A = 1
+EOF
+
+t_err decl-group-empty 255 "syntax error" <<'EOF'
+DECLARE () BYTE
+EOF
+
+t_err decl-group-trailing-comma 255 "syntax error" <<'EOF'
+DECLARE (A,) BYTE
+EOF
+
+t_err decl-group-leading-comma 255 "syntax error" <<'EOF'
+DECLARE (,A) BYTE
+EOF
+
+t_err decl-group-double-comma 255 "syntax error" <<'EOF'
+DECLARE (A,,B) BYTE
+EOF
+
+t_err decl-group-keyword 255 "syntax error" <<'EOF'
+DECLARE (A, IF) BYTE
+EOF
+
+t_err decl-group-badname 255 "syntax error" <<'EOF'
+DECLARE (5A) BYTE
+EOF
+
+t_err decl-group-paren-item 255 "syntax error" <<'EOF'
+DECLARE (A(2)) BYTE
+EOF
+
+t_err decl-group-no-type 255 "syntax error" <<'EOF'
+DECLARE (A, B)
+EOF
+
+t_err decl-group-bad-type 255 "syntax error" <<'EOF'
+DECLARE (A) INT
+EOF
+
+t_err decl-group-redecl 255 "redeclared" <<'EOF'
+DECLARE A BYTE
+DECLARE (A, B) BYTE
+EOF
+
+t_err decl-group-redecl-inner 255 "redeclared" <<'EOF'
+DECLARE (A, A) BYTE
+EOF
+
+t_err decl-group-too-many 255 "syntax error" <<'EOF'
+DECLARE (A) BYTE EXTRA
+EOF
+
+t_err decl-group-unclosed 255 "syntax error" <<'EOF'
+DECLARE (A, B BYTE
+EOF
+
+t_ok do-array-last-batch <<'EOF'
+DO;
+DECLARE A(2) BYTE
+END;
+EOF
+
+t_ok do-array-use-last-batch <<'EOF'
+DO;
+DECLARE A(2) BYTE
+A(0) = 5
+END;
+EOF
+
+t_ok do-group-last-batch <<'EOF'
+DO;
+DECLARE (A, B) BYTE
+A = 1
+END;
+EOF
+
+t_ok do-array-sameline-last <<'EOF'
+DO; DECLARE A(2) BYTE; A(0) = 5; END;
+EOF
+
 t_err array-scalar-sub 255 "syntax error" <<'EOF'
 DECLARE X BYTE
 X = 1
