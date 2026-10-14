@@ -423,7 +423,7 @@ DECLARE X BYTE
 X = (X := )
 EOF
 
-t_err plm-assign-imbedded-prefix 255 "syntax error" <<'EOF'
+t_err plm-assign-imbedded-prefix 255 "undeclared" <<'EOF'
 DECLARE X BYTE
 X = 1
 FOO (X := 2)
@@ -861,12 +861,146 @@ DECLARE X BYTE
 X = 1,
 EOF
 
-t_err builtin-length-blocked 255 "syntax error" <<'EOF'
+t_err array-length-scalar 255 "syntax error" <<'EOF'
 DECLARE X BYTE
 X = LENGTH(X)
 EOF
 
 # --- full image ----------------------------------------------
+
+# --- arrays ----------------------------------------------------
+
+t_ok array-basic <<'EOF'
+DECLARE A(4) BYTE
+DECLARE X BYTE
+A(0) = 10
+A(3) = 40
+X = A(0) + A(3)
+EOF
+
+t_grep array-ram-growth "equ 0xC004" "equ 0xC006" <<'EOF'
+DECLARE A(4) BYTE
+DECLARE B(2) BYTE
+DECLARE X BYTE
+X = A(0)
+EOF
+
+t_ok array-expr-index <<'EOF'
+DECLARE A(8) BYTE
+DECLARE I BYTE
+DECLARE X BYTE
+I = 2
+A(I + 1) = 99
+X = A(I * 2)
+EOF
+
+t_ok array-nested <<'EOF'
+DECLARE A(4) BYTE
+DECLARE B(4) BYTE
+DECLARE X BYTE
+B(1) = 2
+A(B(1)) = 9
+X = A(B(1))
+EOF
+
+t_grep array-length "ld a, 4" <<'EOF'
+DECLARE A(4) BYTE
+DECLARE X BYTE
+X = LENGTH(A)
+EOF
+
+t_grep array-last "ld a, 3" <<'EOF'
+DECLARE A(4) BYTE
+DECLARE X BYTE
+X = LAST(A)
+EOF
+
+t_grep array-hex-size "ld a, 10" <<'EOF'
+DECLARE A(0AH) BYTE
+DECLARE X BYTE
+X = LENGTH(A)
+EOF
+
+t_grep array-bin-dollar-size "ld a, 10" <<'EOF'
+DECLARE B(101B) BYTE
+DECLARE C(1$0) BYTE
+DECLARE X BYTE
+X = LENGTH(B) + LENGTH(C)
+EOF
+
+t_ok array-scope <<'EOF'
+DECLARE X BYTE
+X = 1
+DO;
+DECLARE A(2) BYTE
+A(0) = 5
+END;
+X = X + 1
+EOF
+
+t_ok array-scope-shadow <<'EOF'
+DECLARE A(2) BYTE
+A(0) = 1
+DO;
+DECLARE A BYTE
+A = 2
+END;
+DECLARE X BYTE
+X = A(1)
+EOF
+
+t_ok array-same-batch <<'EOF'
+DECLARE A(4) BYTE; DECLARE X BYTE; X = A(0)
+DECLARE Y BYTE; Y = LENGTH(A)
+EOF
+
+t_err array-scalar-sub 255 "syntax error" <<'EOF'
+DECLARE X BYTE
+X = 1
+DECLARE Y BYTE
+Y = X(0)
+EOF
+
+t_err array-undecl-sub 255 "undeclared" <<'EOF'
+DECLARE Y BYTE
+Y = Z(0)
+EOF
+
+t_err array-addr-array 255 "ADDRESS arrays" <<'EOF'
+DECLARE P(10) ADDRESS
+EOF
+
+t_err array-size-zero 255 "syntax error" <<'EOF'
+DECLARE A(0) BYTE
+EOF
+
+t_err array-size-bad 255 "syntax error" <<'EOF'
+DECLARE A(X) BYTE
+EOF
+
+t_err array-size-multi 255 "syntax error" <<'EOF'
+DECLARE A(1 2) BYTE
+EOF
+
+t_err array-bare-read 255 "syntax error" <<'EOF'
+DECLARE A(4) BYTE
+DECLARE X BYTE
+X = A
+EOF
+
+t_err array-bare-assign 255 "syntax error" <<'EOF'
+DECLARE A(4) BYTE
+A = 5
+EOF
+
+t_err array-length-undecl 255 "undeclared" <<'EOF'
+DECLARE X BYTE
+X = LENGTH(Z)
+EOF
+
+t_err array-too-big 255 ": too large" <<'EOF'
+DECLARE A(256) BYTE
+EOF
 
 t_rom plm-full-image <<'EOF'
 DECLARE I BYTE
