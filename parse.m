@@ -55,7 +55,6 @@ static struct Keyword keyw[] = {
 	{ "halt", THALT },
 	{ "if", TIF },
 	{ "input", TINPUT },
-	{ "int", TDECL },
 	{ "minus", TSUB },
 	{ "mod", TMOD },
 	{ "not", TNOT },
@@ -86,46 +85,20 @@ static struct Keyword keyw[] = {
 }
 
 /*
- * braceDepth
- *	unmatched { count in the word range; quoted braces
- *	carry QUOTE bits and never match; a null end means
- *	no words yet, which counts as balanced
- */
-- (int) braceDepth: (char **) p1 end: (char **) p2
-{
-	register char **p;
-	register int d;
-
-	if(p2 == NULL)
-		return(0);
-	d = 0;
-	for(p=p1; p!=p2; p++)
-		if(*p != NULL) {
-			if(strcmp(*p, "{") == 0)
-				d++;
-			else if(strcmp(*p, "}") == 0)
-				d--;
-		}
-	return(d);
-}
-
-/*
  * headparse
- *	statement or { } block at p1, or 0 when p1 starts
+ *	statement or DO..END group at p1, or 0 when p1 starts
  *	an expression; trailing ; and newlines past the
- *	closing } do not count, so block; rest splits right
+ *	closing END do not count, so group; rest splits right
  */
 - (struct Tree *) headparse: (char **) p1 end: (char **) p2
 {
 	register char **ep;
-	register char **qp;
-	register struct Tree *t;
 	register int k;
 
 	if(p1 == p2)
 		return(0);
 	k = [self srchx: *p1];
-	if(k == TIF || k == TWHILE)
+	if(k == TIF)
 		return [self statement: p1 end: p2];
 	if(k == TDO) {
 		char **m;
@@ -142,33 +115,38 @@ static struct Keyword keyw[] = {
 			return(0);
 		return [self statement: p1 end: m+1];
 	}
-	if(**p1 != '{' || (*p1)[1] != '\0')
-		return(0);
-	ep = p2;
-	while(ep != p1+1 && (*(ep-1))[1] == '\0' &&
-	    (**(ep-1) == ';' || **(ep-1) == '\n'))
-		ep--;
-	if(ep == p1+1 || **(ep-1) != '}' || (*(ep-1))[1] != '\0')
-		return(0);
-	if(p1+1 == ep-1) {
-		t = [self tree];
-		t->DTYP = TBLOCK;
-		t->DLEF = 0;
-		return(t);
-	}
-	qp = p1+1;
-	while(qp != ep-1 && (*qp)[1] == '\0' &&
-	    (**qp == ';' || **qp == '\n'))
-		qp++;
-	if(qp == ep-1) {
-		t = [self tree];
-		t->DTYP = TBLOCK;
-		t->DLEF = 0;
-		return(t);
-	}
+	return(0);
+}
+
+/*
+ * syn1
+ *	syn2
+ *	syn2 ; syntax
+ *
+ *	; and newline split at depth zero, where depth counts
+ *	parens and DO..END pairs alike, so no DO group ever
+ *	splits in the middle
+ */
+/*
+ * splitList
+ *	the TLST node for a syn1 split at p: the head runs
+ *	through headparse, falling back to syn2, and the
+ *	rest through syntax
+ */
+- (struct Tree *) splitList: (char **) p1 at: (char **) p end: (char **) p2
+{
+	register struct Tree *t, *t1;
+
 	t = [self tree];
-	t->DTYP = TBLOCK;
-	t->DLEF = [self syn1: qp end: ep-1];
+	t->DTYP = TLST;
+	t->DLEF = [self headparse: p1 end: p];
+	if(t->DLEF == 0)
+		t->DLEF = [self syn2: p1 end: p];
+	t1 = [self syntax: p+1 end: p2];
+	if(t1 != 0)
+		t->DRIT = t1;
+	else
+		t->DRIT = 0;
 	return(t);
 }
 
@@ -178,8 +156,8 @@ static struct Keyword keyw[] = {
  *	syn2 ; syntax
  *
  *	; and newline split at depth zero, where depth counts
- *	parens, braces and DO..END pairs alike, so neither a
- *	block nor a DO group ever splits in the middle
+ *	parens and DO..END pairs alike, so no DO group ever
+ *	splits in the middle
  */
 - (struct Tree *) syn1: (char **) p1 end: (char **) p2
 {
@@ -195,12 +173,12 @@ static struct Keyword keyw[] = {
 			return(t);
 	}
 	for(p=p1; p!=p2; p++) {
-		if(l == 0) {
-			if([self wordIs: *p name: "do"])
-				dd++;
-			else if([self wordIs: *p name: "end"])
-				dd--;
-		}
+		if(l == 0 && [self wordIs: *p name: "do"])
+			dd++;
+		else if(l == 0 && [self wordIs: *p name: "end"])
+			dd--;
+		if((**p == ';' || **p == '\n') && l == 0 && dd == 0)
+			return [self splitList: p1 at: p end: p2];
 		switch(**p) {
 
 		case '(':
@@ -210,52 +188,102 @@ static struct Keyword keyw[] = {
 		case ')':
 			l--;
 			continue;
-
-		case '{':
-			l++;
-			continue;
-
-		case '}':
-			l--;
-			continue;
-
-		case ';':
-		case '\n':
-			if(l == 0 && dd == 0) {
-				register struct Tree *t1;
-
-				t = [self tree];
-				t->DTYP = TLST;
-				t->DLEF = [self headparse: p1 end: p];
-				if(t->DLEF == 0)
-					t->DLEF = [self syn2: p1 end: p];
-				if((t1 = [self syntax: p+1 end: p2]))
-					t->DRIT = t1;
-				else
-					t->DRIT = 0;
-				return(t);
-			}
 		}
 	}
 	if(l == 0 && dd == 0)
 		return [self syn2: p1 end: p2];
-	(*error)++;
+	[self error: ERR_SYNTAX code: 255];
+	return(0);
+}
+
+/*
+ * matchParen
+ *	the close paren matching the open at p1, or 0 when
+ *	the range holds none
+ */
+- (char **) matchParen: (char **) p1 end: (char **) p2
+{
+	register char **p;
+	register int l;
+
+	l = 0;
+	for(p = p1; p != p2; p++) {
+		if(strcmp(*p, "(") == 0) {
+			l++;
+			continue;
+		}
+		if(strcmp(*p, ")") != 0)
+			continue;
+		l--;
+		if(l != 0)
+			continue;
+		return(p);
+	}
+	return(0);
+}
+
+/*
+ * matchElse
+ *	the ELSE closing an IF body at p1, or 0 when the
+ *	range holds none; nested IFs and DO..END groups
+ *	are skipped
+ */
+- (char **) matchElse: (char **) p1 end: (char **) p2
+{
+	char **p;
+	int l, dd, nest;
+
+	l = 0;
+	dd = 0;
+	nest = 0;
+	for(p = p1; p != p2; p++) {
+		if(strcmp(*p, "(") == 0) {
+			l++;
+			continue;
+		}
+		if(strcmp(*p, ")") == 0) {
+			l--;
+			continue;
+		}
+		if(l != 0)
+			continue;
+		if([self wordIs: *p name: "do"]) {
+			dd++;
+			continue;
+		}
+		if([self wordIs: *p name: "end"]) {
+			dd--;
+			continue;
+		}
+		if(dd != 0)
+			continue;
+		if([self wordIs: *p name: "if"]) {
+			nest++;
+			continue;
+		}
+		if(![self wordIs: *p name: "else"])
+			continue;
+		if(nest != 0) {
+			nest--;
+			continue;
+		}
+		return(p);
+	}
 	return(0);
 }
 
 /*
  * statement
- *	if ( syn3 ) [THEN] syn1
- *	if ( syn3 ) [THEN] syn1 else syn1
+ *	if ( syn3 ) THEN syn1
+ *	if ( syn3 ) THEN syn1 else syn1
  *	if syn3 THEN syn1 [ELSE syn1]
- *	while ( syn3 ) [THEN] syn1
  *	doStatement, below
  *
  * bodies are single line ranges; syn1 parses them so they
- * nest, chain with ; and form { } blocks; an else past any
- * nested ifs belongs to this if, after the C shell's syn3;
- * conditions run through syn3 rather than syn2 so that a
- * PL/M = inside one compares instead of assigning
+ * nest, chain with ; and form DO..END groups; an else past
+ * any nested ifs belongs to this if, after the C shell's
+ * syn3; conditions run through syn3 rather than syn2 so
+ * that a PL/M = inside one compares instead of assigning
  */
 - (struct Tree *) statement: (char **) p1 end: (char **) p2
 {
@@ -265,75 +293,33 @@ static struct Keyword keyw[] = {
 	char **tp;
 	char **bs;
 	register struct Tree *t;
-	int l, k, nest, dd;
+	int l, k, dd;
 
 	k = [self srchx: *p1];
 	if(k == TDO)
 		return [self doStatement: p1 end: p2];
 	if(p2 >= p1+2 && strcmp(*(p1+1), "(") == 0) {
-		l = 0;
-		rp = 0;
-		for(p=p1+1; p!=p2; p++) {
-			if(strcmp(*p, "(") == 0)
-				l++;
-			else if(strcmp(*p, ")") == 0) {
-				l--;
-				if(l == 0) {
-					rp = p;
-					break;
-				}
-			}
-		}
+		rp = [self matchParen: p1+1 end: p2];
 		if(rp == 0) {
-			(*error)++;
+			[self error: ERR_SYNTAX code: 255];
 			return(0);
 		}
 		t = [self tree];
-		if(k == TWHILE) {
-			t->DTYP = TWHILE;
-			t->DLEF = [self syn3: p1+2 end: rp];
-			p = rp+1;
-			if(p != p2 && [self wordIs: *p name: "then"])
-				p++;
-			t->DRIT = [self syn1: p end: p2];
-			return(t);
-		}
 		if(k != TIF) {
-			(*error)++;
+			[self error: ERR_SYNTAX code: 255];
 			return(0);
 		}
 		t->DTYP = TIF;
 		t->DLEF = [self syn3: p1+2 end: rp];
 		t->DSTR = 0;
 		p = rp+1;
-		if(p != p2 && [self wordIs: *p name: "then"])
-			p++;
-		bs = p;
-		nest = 0;
-		l = 0;
-		dd = 0;
-		ep = 0;
-		for(; p!=p2; p++) {
-			if(strcmp(*p, "(") == 0 || strcmp(*p, "{") == 0)
-				l++;
-			else if(strcmp(*p, ")") == 0 || strcmp(*p, "}") == 0)
-				l--;
-			else if(l == 0) {
-				if([self wordIs: *p name: "do"])
-					dd++;
-				else if([self wordIs: *p name: "end"])
-					dd--;
-				else if(dd == 0 && [self wordIs: *p name: "if"])
-					nest++;
-				else if(dd == 0 && [self wordIs: *p name: "else"]) {
-					if(nest == 0) {
-						ep = p;
-						break;
-					}
-					nest--;
-				}
-			}
+		if(p == p2 || ![self wordIs: *p name: "then"]) {
+			[self error: ERR_SYNTAX code: 255];
+			return(0);
 		}
+		p++;
+		bs = p;
+		ep = [self matchElse: p end: p2];
 		if(ep != 0) {
 			t->DRIT = [self syn1: bs end: ep];
 			t->DSTR = [self syn1: ep+1 end: p2];
@@ -343,18 +329,18 @@ static struct Keyword keyw[] = {
 		return(t);
 	}
 	if(k != TIF) {
-		(*error)++;
+		[self error: ERR_SYNTAX code: 255];
 		return(0);
 	}
 	l = 0;
 	dd = 0;
 	tp = 0;
 	for(p=p1+1; p!=p2; p++) {
-		if(strcmp(*p, "(") == 0 || strcmp(*p, "{") == 0) {
+		if(strcmp(*p, "(") == 0) {
 			l++;
 			continue;
 		}
-		if(strcmp(*p, ")") == 0 || strcmp(*p, "}") == 0) {
+		if(strcmp(*p, ")") == 0) {
 			l--;
 			continue;
 		}
@@ -374,7 +360,7 @@ static struct Keyword keyw[] = {
 		}
 	}
 	if(tp == 0) {
-		(*error)++;
+		[self error: ERR_SYNTAX code: 255];
 		return(0);
 	}
 	t = [self tree];
@@ -383,31 +369,7 @@ static struct Keyword keyw[] = {
 	t->DSTR = 0;
 	bs = tp+1;
 	p = bs;
-	nest = 0;
-	l = 0;
-	dd = 0;
-	ep = 0;
-	for(; p!=p2; p++) {
-		if(strcmp(*p, "(") == 0 || strcmp(*p, "{") == 0)
-			l++;
-		else if(strcmp(*p, ")") == 0 || strcmp(*p, "}") == 0)
-			l--;
-		else if(l == 0) {
-			if([self wordIs: *p name: "do"])
-				dd++;
-			else if([self wordIs: *p name: "end"])
-				dd--;
-			else if(dd == 0 && [self wordIs: *p name: "if"])
-				nest++;
-			else if(dd == 0 && [self wordIs: *p name: "else"]) {
-				if(nest == 0) {
-					ep = p;
-					break;
-				}
-				nest--;
-			}
-		}
-	}
+	ep = [self matchElse: p end: p2];
 	if(ep != 0) {
 		t->DRIT = [self syn1: bs end: ep];
 		t->DSTR = [self syn1: ep+1 end: p2];
@@ -415,6 +377,60 @@ static struct Keyword keyw[] = {
 	else
 		t->DRIT = [self syn1: bs end: p2];
 	return(t);
+}
+
+/*
+ * findSemi
+ *	the first ; at depth zero in the range, or 0 when
+ *	there is none
+ */
+- (char **) findSemi: (char **) p1 end: (char **) p2
+{
+	char **q;
+	int l;
+
+	l = 0;
+	for(q = p1; q != p2; q++) {
+		if(strcmp(*q, "(") == 0) {
+			l++;
+			continue;
+		}
+		if(strcmp(*q, ")") == 0) {
+			l--;
+			continue;
+		}
+		if(l != 0 || strcmp(*q, ";") != 0)
+			continue;
+		return(q);
+	}
+	return(0);
+}
+
+/*
+ * findTo
+ *	the TO closing an iterative DO head, or 0 when the
+ *	range holds none
+ */
+- (char **) findTo: (char **) p1 end: (char **) p2
+{
+	char **q;
+	int l;
+
+	l = 0;
+	for(q = p1; q != p2; q++) {
+		if(strcmp(*q, "(") == 0) {
+			l++;
+			continue;
+		}
+		if(strcmp(*q, ")") == 0) {
+			l--;
+			continue;
+		}
+		if(l != 0 || ![self wordIs: *q name: "to"])
+			continue;
+		return(q);
+	}
+	return(0);
 }
 
 /*
@@ -436,11 +452,10 @@ static struct Keyword keyw[] = {
 	struct Tree *t, *e1, *e2, *body;
 	struct Tree *v1, *v2, *v3, *v4, *n1;
 	struct Tree *init, *cond, *incr, *incv, *loop, *lbody, *root;
-	int l;
 
 	m = [self matchEnd: p1 end: p2];
 	if(m == 0) {
-		(*error)++;
+		[self error: ERR_SYNTAX code: 255];
 		return(0);
 	}
 	ep = p2;
@@ -448,30 +463,15 @@ static struct Keyword keyw[] = {
 	    (**(ep-1) == ';' || **(ep-1) == '\n'))
 		ep--;
 	if(ep != m+1) {
-		(*error)++;
+		[self error: ERR_SYNTAX code: 255];
 		return(0);
 	}
 	t = [self tree];
 	p = p1+1;
 	if(p != m && [self wordIs: *p name: "while"]) {
-		l = 0;
-		semi = 0;
-		for(q=p+1; q!=m; q++) {
-			if(strcmp(*q, "(") == 0 || strcmp(*q, "{") == 0) {
-				l++;
-				continue;
-			}
-			if(strcmp(*q, ")") == 0 || strcmp(*q, "}") == 0) {
-				l--;
-				continue;
-			}
-			if(l == 0 && strcmp(*q, ";") == 0) {
-				semi = q;
-				break;
-			}
-		}
+		semi = [self findSemi: p+1 end: m];
 		if(semi == 0) {
-			(*error)++;
+			[self error: ERR_SYNTAX code: 255];
 			return(0);
 		}
 		t->DTYP = TWHILE;
@@ -486,41 +486,14 @@ static struct Keyword keyw[] = {
 	    [self srchx: *p] == -1 && [self nameOk: *p] &&
 	    p+1 != m && strcmp(*(p+1), "=") == 0) {
 		var = *p;
-		l = 0;
-		topos = 0;
-		for(q=p+2; q!=m; q++) {
-			if(strcmp(*q, "(") == 0 || strcmp(*q, "{") == 0) {
-				l++;
-				continue;
-			}
-			if(strcmp(*q, ")") == 0 || strcmp(*q, "}") == 0) {
-				l--;
-				continue;
-			}
-			if(l == 0 && [self wordIs: *q name: "to"]) {
-				topos = q;
-				break;
-			}
+		topos = [self findTo: p+2 end: m];
+		if(topos == 0) {
+			[self error: ERR_SYNTAX code: 255];
+			return(0);
 		}
-		l = 0;
-		semi = 0;
-		if(topos != 0)
-			for(q=topos+1; q!=m; q++) {
-				if(strcmp(*q, "(") == 0 || strcmp(*q, "{") == 0) {
-					l++;
-					continue;
-				}
-				if(strcmp(*q, ")") == 0 || strcmp(*q, "}") == 0) {
-					l--;
-					continue;
-				}
-				if(l == 0 && strcmp(*q, ";") == 0) {
-					semi = q;
-					break;
-				}
-			}
-		if(topos == 0 || semi == 0) {
-			(*error)++;
+		semi = [self findSemi: topos+1 end: m];
+		if(semi == 0) {
+			[self error: ERR_SYNTAX code: 255];
 			return(0);
 		}
 		e1 = [self syn3: p+2 end: topos];
@@ -607,13 +580,6 @@ static struct Keyword keyw[] = {
 		l--;
 		continue;
 
-	case '{':
-		l++;
-		continue;
-
-	case '}':
-		l--;
-		continue;
 
 	case '=':
 		if(l == 0 && (*p)[1] != '=') {
@@ -626,14 +592,13 @@ static struct Keyword keyw[] = {
 	}
 	if(l == 0)
 		return [self syn3: p1 end: p2];
-	(*error)++;
+	[self error: ERR_SYNTAX code: 255];
 	return(0);
 }
 
 /*
  * syn3
  *	syn4
- *	syn3 || syn4
  *	syn3 OR syn4
  */
 - (struct Tree *) syn3: (char **) p1 end: (char **) p2
@@ -656,18 +621,6 @@ static struct Keyword keyw[] = {
 		l--;
 		continue;
 
-	case '{':
-		l++;
-		continue;
-
-	case '}':
-		l--;
-		continue;
-
-	case '|':
-		if(l == 0 && (*p)[1] == '|')
-			q = p;
-		continue;
 
 	default:
 		if(l == 0 && [self srchx: *p] == TOR2)
@@ -683,15 +636,14 @@ static struct Keyword keyw[] = {
 	}
 	if(l == 0)
 		return [self syn4: p1 end: p2];
-	(*error)++;
+	[self error: ERR_SYNTAX code: 255];
 	return(0);
 }
 
 /*
  * syn4
- *	syn5
- *	syn4 && syn5
- *	syn4 AND syn5
+ *	synxor
+ *	syn4 AND synxor
  */
 - (struct Tree *) syn4: (char **) p1 end: (char **) p2
 {
@@ -713,18 +665,6 @@ static struct Keyword keyw[] = {
 		l--;
 		continue;
 
-	case '{':
-		l++;
-		continue;
-
-	case '}':
-		l--;
-		continue;
-
-	case '&':
-		if(l == 0 && (*p)[1] == '&')
-			q = p;
-		continue;
 
 	default:
 		if(l == 0 && [self srchx: *p] == TAND2)
@@ -735,73 +675,19 @@ static struct Keyword keyw[] = {
 		t = [self tree];
 		t->DTYP = TAND2;
 		t->DLEF = [self syn4: p1 end: q];
-		t->DRIT = [self syn5: q+1 end: p2];
-		return(t);
-	}
-	if(l == 0)
-		return [self syn5: p1 end: p2];
-	(*error)++;
-	return(0);
-}
-
-/*
- * syn5
- *	synxor
- *	syn5 | synxor
- *
- * single '|' is bitwise or now that commands are gone
- */
-- (struct Tree *) syn5: (char **) p1 end: (char **) p2
-{
-	register char **p;
-	register struct Tree *t;
-	char **q;
-	int l;
-
-	l = 0;
-	q = 0;
-	for(p=p1; p!=p2; p++)
-	switch(**p) {
-
-	case '(':
-		l++;
-		continue;
-
-	case ')':
-		l--;
-		continue;
-
-	case '{':
-		l++;
-		continue;
-
-	case '}':
-		l--;
-		continue;
-
-	case '|':
-		if(l == 0 && (*p)[1] != '|')
-			q = p;
-		continue;
-	}
-	if(q != 0) {
-		t = [self tree];
-		t->DTYP = TOR;
-		t->DLEF = [self syn5: p1 end: q];
 		t->DRIT = [self synxor: q+1 end: p2];
 		return(t);
 	}
 	if(l == 0)
 		return [self synxor: p1 end: p2];
-	(*error)++;
+	[self error: ERR_SYNTAX code: 255];
 	return(0);
 }
 
 /*
  * synxor
- *	syn6
- *	synxor ^ syn6
- *	synxor XOR syn6
+ *	syneq
+ *	synxor XOR syneq
  */
 - (struct Tree *) synxor: (char **) p1 end: (char **) p2
 {
@@ -823,18 +709,6 @@ static struct Keyword keyw[] = {
 		l--;
 		continue;
 
-	case '{':
-		l++;
-		continue;
-
-	case '}':
-		l--;
-		continue;
-
-	case '^':
-		if(l == 0 && (*p)[1] == '\0')
-			q = p;
-		continue;
 
 	default:
 		if(l == 0 && [self srchx: *p] == TXOR)
@@ -845,66 +719,12 @@ static struct Keyword keyw[] = {
 		t = [self tree];
 		t->DTYP = TXOR;
 		t->DLEF = [self synxor: p1 end: q];
-		t->DRIT = [self syn6: q+1 end: p2];
-		return(t);
-	}
-	if(l == 0)
-		return [self syn6: p1 end: p2];
-	(*error)++;
-	return(0);
-}
-
-/*
- * syn6
- *	syneq
- *	syn6 & syneq
- *
- * single '&' is bitwise and; trailing background '&'
- * has no meaning without commands
- */
-- (struct Tree *) syn6: (char **) p1 end: (char **) p2
-{
-	register char **p;
-	register struct Tree *t;
-	char **q;
-	int l;
-
-	l = 0;
-	q = 0;
-	for(p=p1; p!=p2; p++)
-	switch(**p) {
-
-	case '(':
-		l++;
-		continue;
-
-	case ')':
-		l--;
-		continue;
-
-	case '{':
-		l++;
-		continue;
-
-	case '}':
-		l--;
-		continue;
-
-	case '&':
-		if(l == 0 && (*p)[1] != '&')
-			q = p;
-		continue;
-	}
-	if(q != 0) {
-		t = [self tree];
-		t->DTYP = TAND;
-		t->DLEF = [self syn6: p1 end: q];
 		t->DRIT = [self syneq: q+1 end: p2];
 		return(t);
 	}
 	if(l == 0)
 		return [self syneq: p1 end: p2];
-	(*error)++;
+	[self error: ERR_SYNTAX code: 255];
 	return(0);
 }
 
@@ -945,8 +765,6 @@ static struct Keyword keyw[] = {
 /*
  * syneq
  *	synrel
- *	syneq == synrel
- *	syneq != synrel
  *	syneq = synrel
  *	syneq <> synrel
  *
@@ -974,23 +792,9 @@ static struct Keyword keyw[] = {
 		l--;
 		continue;
 
-	case '{':
-		l++;
-		continue;
-
-	case '}':
-		l--;
-		continue;
 
 	case '=':
-		if(l == 0 && ((*p)[1] == '=' || (*p)[1] == '\0')) {
-			q = p;
-			qc = **p;
-		}
-		continue;
-
-	case '!':
-		if(l == 0 && (*p)[1] == '=') {
+		if(l == 0 && (*p)[1] == '\0') {
 			q = p;
 			qc = **p;
 		}
@@ -1015,7 +819,7 @@ static struct Keyword keyw[] = {
 	}
 	if(l == 0)
 		return [self synrel: p1 end: p2];
-	(*error)++;
+	[self error: ERR_SYNTAX code: 255];
 	return(0);
 }
 
@@ -1051,13 +855,6 @@ static struct Keyword keyw[] = {
 		l--;
 		continue;
 
-	case '{':
-		l++;
-		continue;
-
-	case '}':
-		l--;
-		continue;
 
 	case '<':
 	case '>':
@@ -1080,7 +877,7 @@ static struct Keyword keyw[] = {
 	}
 	if(l == 0)
 		return [self synadd: p1 end: p2];
-	(*error)++;
+	[self error: ERR_SYNTAX code: 255];
 	return(0);
 }
 
@@ -1116,13 +913,6 @@ static struct Keyword keyw[] = {
 		l--;
 		continue;
 
-	case '{':
-		l++;
-		continue;
-
-	case '}':
-		l--;
-		continue;
 
 	case '+':
 	case '-':
@@ -1133,13 +923,13 @@ static struct Keyword keyw[] = {
 		continue;
 
 	default:
-		if(l == 0) {
-			k2 = [self srchx: *p];
-			if(k2 == TADD || k2 == TSUB) {
-				q = p;
-				qc = (k2 == TADD) ? '+' : '-';
-			}
-		}
+		if(l != 0)
+			continue;
+		k2 = [self srchx: *p];
+		if(k2 != TADD && k2 != TSUB)
+			continue;
+		q = p;
+		qc = (k2 == TADD) ? '+' : '-';
 		continue;
 	}
 	if(q != 0) {
@@ -1154,7 +944,7 @@ static struct Keyword keyw[] = {
 	}
 	if(l == 0)
 		return [self synmul: p1 end: p2];
-	(*error)++;
+	[self error: ERR_SYNTAX code: 255];
 	return(0);
 }
 
@@ -1163,7 +953,6 @@ static struct Keyword keyw[] = {
  *	synun
  *	synmul * synun
  *	synmul / synun
- *	synmul % synun
  *	synmul MOD synun
  */
 - (struct Tree *) synmul: (char **) p1 end: (char **) p2
@@ -1187,17 +976,9 @@ static struct Keyword keyw[] = {
 		l--;
 		continue;
 
-	case '{':
-		l++;
-		continue;
-
-	case '}':
-		l--;
-		continue;
 
 	case '*':
 	case '/':
-	case '%':
 		if(l == 0 && (*p)[1] == '\0' && p != p1 && ![self isOperator: *(p-1)]) {
 			q = p;
 			qc = **p;
@@ -1225,7 +1006,7 @@ static struct Keyword keyw[] = {
 	}
 	if(l == 0)
 		return [self synun: p1 end: p2];
-	(*error)++;
+	[self error: ERR_SYNTAX code: 255];
 	return(0);
 }
 
@@ -1234,7 +1015,6 @@ static struct Keyword keyw[] = {
  *	syn7
  *	- synun
  *	+ synun
- *	! synun
  *	NOT synun
  *
  * unary minus is 0 - x, logical not is x == 0, so no
@@ -1258,16 +1038,6 @@ static struct Keyword keyw[] = {
 		}
 		if(strcmp(*p1, "+") == 0)
 			return [self synun: p1+1 end: p2];
-		if(strcmp(*p1, "!") == 0) {
-			t = [self tree];
-			t->DTYP = TEQU;
-			t->DLEF = [self synun: p1+1 end: p2];
-			t1 = [self tree];
-			t1->DTYP = TNUM;
-			t1->DARR[0] = "0";
-			t->DRIT = t1;
-			return(t);
-		}
 		if([self wordIs: *p1 name: "not"]) {
 			t = [self tree];
 			t->DTYP = TEQU;
@@ -1381,8 +1151,7 @@ static struct Keyword keyw[] = {
 
 /*
  * doDepth
- *	unmatched DO count in the word range, the DO..END
- *	twin of braceDepth above; paren and brace interiors
+ *	unmatched DO count in the word range; paren interiors
  *	do not count, and quoted words never match
  */
 - (int) doDepth: (char **) p1 end: (char **) p2
@@ -1398,11 +1167,11 @@ static struct Keyword keyw[] = {
 	for(p=p1; p!=p2; p++) {
 		if(*p == NULL)
 			continue;
-		if(strcmp(*p, "(") == 0 || strcmp(*p, "{") == 0) {
+		if(strcmp(*p, "(") == 0) {
 			l++;
 			continue;
 		}
-		if(strcmp(*p, ")") == 0 || strcmp(*p, "}") == 0) {
+		if(strcmp(*p, ")") == 0) {
 			l--;
 			continue;
 		}
@@ -1432,25 +1201,64 @@ static struct Keyword keyw[] = {
 	for(p=p1; p!=p2; p++) {
 		if(*p == NULL)
 			continue;
-		if(strcmp(*p, "(") == 0 || strcmp(*p, "{") == 0) {
+		if(strcmp(*p, "(") == 0) {
 			l++;
 			continue;
 		}
-		if(strcmp(*p, ")") == 0 || strcmp(*p, "}") == 0) {
+		if(strcmp(*p, ")") == 0) {
 			l--;
 			continue;
 		}
 		if(l != 0)
 			continue;
-		if([self wordIs: *p name: "do"])
+		if([self wordIs: *p name: "do"]) {
 			dd++;
-		else if([self wordIs: *p name: "end"]) {
-			dd--;
-			if(dd == 0)
-				return(p);
+			continue;
 		}
+		if(![self wordIs: *p name: "end"])
+			continue;
+		dd--;
+		if(dd != 0)
+			continue;
+		return(p);
 	}
 	return(0);
+}
+
+/*
+ * call
+ *	an INPUT or OUTPUT node around the argument syntax
+ */
+- (struct Tree *) call: (int) k args: (char **) lp end: (char **) rp
+{
+	struct Tree *t;
+
+	t = [self tree];
+	t->DTYP = k;
+	t->DLEF = [self syn2: lp end: rp];
+	return(t);
+}
+
+/*
+ * stripDollar
+ *	drop the $ signs read for show in a number, in place
+ */
+- (void) stripDollar: (char *) s
+{
+	char *a, *b;
+
+	a = s;
+	b = s;
+	while(*a != '\0') {
+		if(*a == '$') {
+			a++;
+			continue;
+		}
+		*b = *a;
+		b++;
+		a++;
+	}
+	*b = '\0';
 }
 
 /*
@@ -1475,11 +1283,10 @@ static struct Keyword keyw[] = {
 	switch(**p) {
 
 	case '(':
-		if(l == 0) {
-			if(lp != 0)
-				(*error)++;
+		if(l == 0 && lp != 0)
+			[self error: ERR_SYNTAX code: 255];
+		if(l == 0)
 			lp = p+1;
-		}
 		l++;
 		continue;
 
@@ -1494,83 +1301,56 @@ static struct Keyword keyw[] = {
 			p1[n++] = *p;
 	}
 	if(lp != 0) {
-		if(n == 1) {
+		if(n == 1)
 			k = [self srchx: p1[0]];
-			if(k == TINPUT || k == TOUTPUT) {
-				t = [self tree];
-				t->DTYP = k;
-				t->DLEF = [self syn2: lp end: rp];
-				return(t);
-			}
-		}
+		else
+			k = -1;
+		if(k == TINPUT || k == TOUTPUT)
+			return [self call: k args: lp end: rp];
 		if(n != 0)
-			(*error)++;
+			[self error: ERR_SYNTAX code: 255];
 		t = [self tree];
 		t->DTYP = TPAR;
 		t->DSTR = [self syn1: lp end: rp];
 		return(t);
 	}
 	if(n == 0) {
-		(*error)++;
+		[self error: ERR_SYNTAX code: 255];
 		return(0);
 	}
 	switch(k = [self srchx: p1[0]]) {
 
 	case TDECL:
-		if([self wordIs: p1[0] name: "declare"]) {
-			/* DECLARE name BYTE, DECLARE name ADDRESS */
-			if(n != 3) {
-				(*error)++;
-				return(0);
-			}
-			if([self srchx: p1[1]] != -1 || ![self nameOk: p1[1]]) {
-				(*error)++;
-				return(0);
-			}
-			t = [self tree];
-			if([self wordIs: p1[2] name: "byte"])
-				t->DTYP = TDECL;
-			else if([self wordIs: p1[2] name: "address"])
-				t->DTYP = TADDR;
-			else {
-				(*error)++;
-				return(0);
-			}
-			t->DARR[0] = p1[1];
-			return(t);
-		}
-		if(n != 2) {
-			(*error)++;
+		/* DECLARE name BYTE, DECLARE name ADDRESS */
+		if(n != 3) {
+			[self error: ERR_SYNTAX code: 255];
 			return(0);
 		}
 		if([self srchx: p1[1]] != -1 || ![self nameOk: p1[1]]) {
-			(*error)++;
+			[self error: ERR_SYNTAX code: 255];
 			return(0);
 		}
 		t = [self tree];
-		t->DTYP = TDECL;
+		if([self wordIs: p1[2] name: "byte"])
+			t->DTYP = TDECL;
+		else if([self wordIs: p1[2] name: "address"])
+			t->DTYP = TADDR;
+		else {
+			[self error: ERR_SYNTAX code: 255];
+			return(0);
+		}
 		t->DARR[0] = p1[1];
 		return(t);
 
 	case TADDR:
-		if(n != 2) {
-			(*error)++;
-			return(0);
-		}
-		if([self srchx: p1[1]] != -1 || ![self nameOk: p1[1]]) {
-			(*error)++;
-			return(0);
-		}
-		t = [self tree];
-		t->DTYP = TADDR;
-		t->DARR[0] = p1[1];
-		return(t);
+		[self error: ERR_SYNTAX code: 255];
+		return(0);
 
 	case TDISABLE:
 	case TENABLE:
 	case THALT:
 		if(n != 1) {
-			(*error)++;
+			[self error: ERR_SYNTAX code: 255];
 			return(0);
 		}
 		t = [self tree];
@@ -1592,36 +1372,26 @@ static struct Keyword keyw[] = {
 	case TMOD:
 	case TADD:
 	case TSUB:
-		(*error)++;
+		[self error: ERR_SYNTAX code: 255];
 		return(0);
 	}
 	if((p1[0][0] >= '0' && p1[0][0] <= '9') ||
 	    (p1[0][0] == '-' && p1[0][1] >= '0' && p1[0][1] <= '9')) {
-		char *a, *b;
-
 		/* $ signs read for show in numbers are dropped */
-		a = p1[0];
-		b = p1[0];
-		while(*a) {
-			if(*a != '$')
-				*b++ = *a;
-			a++;
-		}
-		*b = '\0';
+		[self stripDollar: p1[0]];
 		t = [self tree];
 		t->DTYP = TNUM;
 		t->DARR[0] = p1[0];
 		return(t);
 	}
 	if([self anyCharacter: p1[0][0] in: "=|&^<>!+-*/%~{}"]) {
-		(*error)++;
+		[self error: ERR_SYNTAX code: 255];
 		return(0);
 	}
 	if(n != 1) {
-		(*error)++;
+		[self error: ERR_SYNTAX code: 255];
 		return(0);
 	}
-	p1[n++] = 0;
 	t = [self tree];
 	t->DTYP = TVAR;
 	for(l=0; l<n; l++)
