@@ -59,6 +59,10 @@ main(int c, char *av[])
 	(void) [sh getScope];
 	(void) [sh getRamPointer];
 	(void) [sh getOrgFlag];
+	(void) [sh getMacroCount];
+	(void) [sh getLabCount];
+	(void) [sh getProcCount];
+	(void) [sh getInProc];
 	v = av;
 	if(c > 1) {
 		close(0);
