@@ -70,6 +70,7 @@ main(int c, char *av[])
 	(void) [sh getJumpBuffer];
 	(void) [sh getLabelCount];
 	(void) [sh getSymbolCount];
+	(void) [sh getScope];
 	(void) [sh getOrgFlag];
 	(void) strcpy([sh getPIDPointer], [sh integerToASCII: getpid()]);
 	v = av;
