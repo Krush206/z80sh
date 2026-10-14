@@ -14,21 +14,28 @@
 
 #define QUOTE 0200
 
-#define FAND 1
-#define FCAT 2
-#define FPIN 4
-#define FPOU 8
-#define FPAR 16
-#define FINT 32
-#define FPRS 64
-#define TCOM 1
+#define TVAR 1
 #define TPAR 2
-#define TFIL 3
-#define TLST 4
+#define TOR 3
+#define TAND 4
+#define TXOR 5
+#define TASG 6
+#define TGTR 7
+#define TLSS 8
+#define TLST 9
+#define TEQU 10
+#define TNEQ 11
+#define TGEQ 12
+#define TLEQ 13
+#define TOR2 14
+#define TAND2 15
+#define TNUM 16
+#define TDECL 17
+#define TADD 18
+#define TSUB 19
 #define DTYP t_dtyp
 #define DLEF t_dlef.t_dltr
 #define DRIT t_drit.t_drtr
-#define DFLG t_dflg
 #define DARR t_dcom.t_darr
 #define DPTR t_dcom.t_dptr
 #define DSPT t_dspr.t_dptr
@@ -75,7 +82,6 @@ struct Argument {
 
 struct Tree {
 	int t_dtyp;
-	int t_dflg;
 	union {
 		struct Tree *t_dltr;
 		char *t_dlpt;
@@ -133,22 +139,12 @@ struct Pack {
 	jmp_buf *jmp;
 	struct Argument *argdef;
 }
-+ (int) argumentCount: (int) c argumentVector: (char *[]) av;
++ (int) argumentCount: (int) c argumentVector: (char **) av;
 - (void) main;
 @end
 
 @interface Shell (Semantic)
-- (void) execute: (struct Tree *) t input: (int *) pf1 output: (int *) pf2;
-@end
-
-@interface Shell (Process)
-- (void) wait: (int) i;
-@end
-
-@interface Shell (Execute)
-- (id) execute: (id) obj message: (const char *) msg;
-- (char *) buildArguments: (char **) line;
-- (void) execute: (char *) f tree: (struct Tree *) at;
+- (void) compileTree: (struct Tree *) t;
 @end
 
 @interface Shell (Lexer)
@@ -163,6 +159,10 @@ struct Pack {
 - (struct Tree *) syn1: (char **) p1 end: (char **) p2;
 - (struct Tree *) syn2: (char **) p1 end: (char **) p2;
 - (struct Tree *) syn3: (char **) p1 end: (char **) p2;
+- (struct Tree *) syn4: (char **) p1 end: (char **) p2;
+- (struct Tree *) syn5: (char **) p1 end: (char **) p2;
+- (struct Tree *) syn6: (char **) p1 end: (char **) p2;
+- (struct Tree *) syn7: (char **) p1 end: (char **) p2;
 - (struct Tree *) tree;
 @end
 
@@ -216,25 +216,5 @@ struct Pack {
 - (int *) getExecuteFlag;
 - (jmp_buf *) getJumpBuffer;
 - (struct Argument *) getArgumentDefinition;
-@end
-
-@interface Function: Object
-{
-@private
-	id sh;
-}
-+ (id) new;
-- (struct Pack *) getBuiltin;
-- (int) scan: (struct Tree *) t;
-- (void) dozip: (struct Tree *) t;
-- (void) doset: (struct Tree *) t;
-- (void) doobj: (struct Tree *) t;
-- (void) dochdir: (struct Tree *) t;
-- (void) dologin: (struct Tree *) t;
-- (void) donewgrp: (struct Tree *) t;
-- (void) doshift: (struct Tree *) t;
-- (void) dowait: (struct Tree *) t;
-- (id) getShell;
-- (void) setShell: (id) ptr;
 @end
 #endif /* !SH_H */
