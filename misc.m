@@ -172,11 +172,11 @@
 	return orgflg = &ret;
 }
 
-- (int *) getOrgEnable
+- (int *) getOrgAddress
 {
-	static int ret;
+	static int ret = -1;
 
-	return orgen = &ret;
+	return orgadr = &ret;
 }
 
 - (int *) getCartEnable
