@@ -252,7 +252,15 @@ An interrupt procedure is `name: PROCEDURE INTERRUPT n;`
 
 ## Predefined variables
 
-`CARRY ZERO SIGN PARITY MEMORY STACKPTR`: planned.
+`CARRY`, `ZERO`, `SIGN`, and `PARITY` are byte-valued predefined
+variables that read a Z80 flag: the value is `0FFH` when the flag
+is set and `00H` when it is clear, after the PL/M-80 true/false
+convention.  A read tests the flag left by the preceding
+instruction, so it sees the result of the most recent arithmetic
+or compare.  They may not be assigned to or redeclared, and the
+names are matched case-insensitively with `$` signs ignored.
+
+`MEMORY` and `STACKPTR`: planned.
 
 ## Building and testing
 
