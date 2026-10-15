@@ -13,14 +13,16 @@ outside the language (no C-like spellings) is accepted.
 named on the command line, and writes assembly to standard
 output:
 
-    z80sh [-o] [-h] [file.plm]
+    z80sh [-o address] [-h] [file.plm]
 
 By default the output is plain code: it begins at address 0
 and ends with `halt`. Two target-specific pieces are opt-in:
 
-- `-o` emits the org-0 startup: interrupt vectors, the boot
-  stub that clears RAM, silences the sound chip and enters
-  the program at `start`.
+- `-o address` emits the startup at that address: interrupt
+  vectors, the boot stub that clears RAM, silences the sound
+  chip and enters the program at `start`. The address is a
+  PL/M constant (`0`, `8000H`, `32768`) or a `0x` hexadecimal
+  word (`0x2000`).
 - `-h` emits the Sega cartridge header (`TMR SEGA`) at
   `0x7FF0` after the code.
 
@@ -260,7 +262,7 @@ never freed) and run the suite:
 
 The suite rebuilds the compiler and checks exit codes,
 diagnostics, emitted assembly and final image bytes for
-207 programs, including one rejection test per non-PL/M
+212 programs, including one rejection test per non-PL/M
 spelling (`int`, `==`, `!=`, `!`, `&&`, `||`, `&`, `|`,
 `^`, `%`, bare `WHILE`, `THEN`-less `IF`, `{`/`}`,
 `//` comments).
