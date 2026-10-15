@@ -202,13 +202,13 @@ struct Tree {
 @interface Shell (Parser)
 - (struct Tree *) syntax: (char **) p1 end: (char **) p2;
 - (struct Tree *) splitList: (char **) p1 at: (char **) p end: (char **) p2;
-- (struct Tree *) syn1: (char **) p1 end: (char **) p2;
+- (struct Tree *) synstmt: (char **) p1 end: (char **) p2;
 - (struct Tree *) statement: (char **) p1 end: (char **) p2;
 - (struct Tree *) headparse: (char **) p1 end: (char **) p2;
-- (struct Tree *) syn2: (char **) p1 end: (char **) p2;
-- (struct Tree *) syn3: (char **) p1 end: (char **) p2;
-- (struct Tree *) syn4: (char **) p1 end: (char **) p2;
-- (struct Tree *) syn7: (char **) p1 end: (char **) p2;
+- (struct Tree *) synasg: (char **) p1 end: (char **) p2;
+- (struct Tree *) synor: (char **) p1 end: (char **) p2;
+- (struct Tree *) synand: (char **) p1 end: (char **) p2;
+- (struct Tree *) synprim: (char **) p1 end: (char **) p2;
 - (struct Tree *) synnot: (char **) p1 end: (char **) p2;
 - (struct Tree *) syneq: (char **) p1 end: (char **) p2;
 - (struct Tree *) synrel: (char **) p1 end: (char **) p2;
