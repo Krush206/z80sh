@@ -128,13 +128,18 @@ branch, so prefer a variable there.
   `IF expression THEN stmt; ELSE stmt;`: supported.
   `ELSE` binds to the nearest open `IF`.
 - `GOTO label;` and `GO TO label;`: supported. A label is
-  declared implicitly by `label: statement;`; forward
-  references resolve in the assembler.
+  declared by `DECLARE label LABEL;` or implicitly by
+  `label: statement;`; forward references resolve in the
+  assembler.
 - `DISABLE;` / `ENABLE;` (interrupts off/on): supported.
 - `HALT;`: supported.
 - `CALL name;` and `CALL name(args);` invoke a void
   procedure. A typed procedure is called in an
   expression: `x = f(a, b);`. Both are supported.
+- A program may be wrapped in a module,
+  `name: DO; ...; END name;`, with the name after `END`
+  optional; the wrapper may also be omitted, leaving the
+  statements to compile on their own.
 
 ## Declarations
 
@@ -147,6 +152,7 @@ Supported today:
     DECLARE name BYTE INITIAL (v, ...);   preset bytes
     DECLARE name DATA (v, ...);    ROM-resident bytes
     DECLARE name LITERALLY 'text'; source substitution
+    DECLARE name LABEL;            a GOTO target
 
 Array elements read and write with `A(i)` for any byte
 index expression, nesting included; `ADDRESS` arrays index
@@ -160,11 +166,11 @@ are rejected in expressions.
 the variable at its declaration, so the storage is preset
 at run time; `DATA` names ROM-resident bytes directly and
 takes no writable storage. A `LITERALLY` macro substitutes
-its text at parse time and declares no storage.
+its text at parse time and declares no storage. A `LABEL`
+declares a `GOTO` target and no storage.
 
 Planned, in this order:
 
-    DECLARE x LABEL;                labels
     DECLARE p ADDRESS, v BASED p BYTE;
 
 ## Procedures
@@ -188,8 +194,12 @@ arrive in `E` and `C`, earlier ones on the stack (deepest
 first), and arguments evaluate left to right. Procedures are
 non-recursive, since parameters live in static storage.
 
-Planned: `INTERRUPT n` handlers for `n` in 0–7, and
-`ADDRESS` parameters.
+An interrupt procedure is `name: PROCEDURE INTERRUPT n;`
+(no parameters, no result type). Its body saves and restores
+`hl`, `de`, `bc` and `af` and re-enables interrupts with
+`ei` before returning. Supported.
+
+Planned: `ADDRESS` parameters.
 
 ## Built-in procedures
 
@@ -225,7 +235,7 @@ never freed) and run the suite:
 
 The suite rebuilds the compiler and checks exit codes,
 diagnostics, emitted assembly and final image bytes for
-172 programs, including one rejection test per non-PL/M
+182 programs, including one rejection test per non-PL/M
 spelling (`int`, `==`, `!=`, `!`, `&&`, `||`, `&`, `|`,
 `^`, `%`, bare `WHILE`, `THEN`-less `IF`, `{`/`}`,
 `//` comments).
