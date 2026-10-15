@@ -545,13 +545,43 @@ X = X - 1;
 END;
 EOF
 
-t_grep plm-do-iterative "ld \(i\), a" "add a, b" "or a" <<'EOF'
+t_grep plm-do-iterative "ld \(i\), a" "add a, b" "or a" "jr nc" <<'EOF'
 DECLARE I BYTE
 DECLARE X BYTE
 X = 0
 DO I = 1 TO 3;
 X = X + I;
 END;
+EOF
+
+# the optional BY clause sets the step; it may be any
+# expression, evaluated each pass
+t_grep plm-do-iterative-by "ld a, 2" <<'EOF'
+DECLARE I BYTE
+DO I = 1 TO 9 BY 2;
+HALT;
+END;
+EOF
+
+t_ok plm-do-iterative-by-expr <<'EOF'
+DECLARE I BYTE
+DECLARE C BYTE
+DO I = 1 TO 9 BY C + 1;
+HALT;
+END;
+EOF
+
+t_grep plm-do-iterative-by-var "ld a, \(c\)" <<'EOF'
+DECLARE I BYTE
+DECLARE C BYTE
+DO I = 1 TO 9 BY C;
+HALT;
+END;
+EOF
+
+# BY is a reserved word, never an identifier
+t_err by-reserved 255 "syntax error" <<'EOF'
+DECLARE BY BYTE;
 EOF
 
 t_ok plm-nested-do <<'EOF'
