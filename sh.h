@@ -76,6 +76,8 @@
 #define TINTERRUPT 65
 #define TLDEF 66
 #define TNOP 67
+#define TBY 68
+#define TDOFOR 69
 #define TMUL 20
 #define TDIV 21
 #define TMOD 22
@@ -230,6 +232,7 @@ struct Tree {
 - (char **) matchElse: (char **) p1 end: (char **) p2;
 - (char **) findSemi: (char **) p1 end: (char **) p2;
 - (char **) findTo: (char **) p1 end: (char **) p2;
+- (char **) findBy: (char **) p1 end: (char **) p2;
 - (char **) findComma: (char **) p1 end: (char **) p2;
 - (char **) findPlus: (char **) p1 end: (char **) p2;
 - (char **) skipSep: (char **) p1 end: (char **) p2;
