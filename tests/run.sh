@@ -1310,7 +1310,8 @@ DECLARE X BYTE;
 X = ADDU(10, 3);
 EOF
 
-t_grep proc-three-params "Q_sub3:" "pop af" "ld c, a" "ld e, a" <<'EOF'
+t_grep proc-three-params "Q_sub3:" "ld \(hl\), e" "ld \(hl\), c" \
+	"pop bc" <<'EOF'
 SUB3: PROCEDURE(P, Q, R) BYTE;
 DECLARE P BYTE, Q BYTE, R BYTE;
 RETURN P - Q - R;
@@ -1449,9 +1450,9 @@ DECLARE X BYTE;
 X = F(1, 2);
 EOF
 
-# a single argument is passed in C on both sides, as in
-# PL/M-80, not in E
-t_grep proc-one-param-in-c "Q_f:" "ld \(hl\), c" "ld c, a" <<'EOF'
+# a single argument is passed as a 16-bit value in BC, its
+# byte in C, as in PL/M-80, not in E
+t_grep proc-one-param-in-c "Q_f:" "ld \(hl\), c" "pop bc" <<'EOF'
 F: PROCEDURE(A) BYTE;
 DECLARE A BYTE;
 RETURN A;
@@ -1481,6 +1482,71 @@ elif ! z80asm -o "$TMP/t.bin" "$TMP/t.asm" 2> "$TMP/t.asserr"; then
 else
 	pass proc-params-own-storage
 fi
+
+# --- ADDRESS parameters -------------------------------------
+
+# a single ADDRESS parameter arrives whole, low byte in C
+# and high byte in B
+t_grep proc-addr-one-param "Q_f:" "ld \(hl\), c" "inc hl" \
+	"ld \(hl\), b" "pop bc" <<'EOF'
+F: PROCEDURE(P);
+DECLARE P ADDRESS;
+RETURN;
+END F;
+CALL F(1234H);
+EOF
+
+# with two ADDRESS parameters the last is in DE and the one
+# before it in BC
+t_grep proc-addr-two-params "Q_f:" "ld \(hl\), e" "ld \(hl\), d" \
+	"ld \(hl\), c" "ld \(hl\), b" "pop de" "pop bc" <<'EOF'
+F: PROCEDURE(P, Q);
+DECLARE P ADDRESS, Q ADDRESS;
+RETURN;
+END F;
+CALL F(1111H, 2222H);
+EOF
+
+# a third ADDRESS parameter goes on the stack and the callee
+# pops it, having saved the return address in DE
+t_grep proc-addr-three-params "Q_f:" "pop de" "pop bc" \
+	"push de" <<'EOF'
+F: PROCEDURE(P, Q, R);
+DECLARE P ADDRESS, Q ADDRESS, R ADDRESS;
+RETURN;
+END F;
+CALL F(1111H, 2222H, 3333H);
+EOF
+
+# mixed widths: A BYTE arrives in C, B ADDRESS in DE
+t_grep proc-addr-mixed "Q_f:" "ld \(hl\), c" "ld \(hl\), e" \
+	"inc hl" "ld \(hl\), d" <<'EOF'
+F: PROCEDURE(A, B);
+DECLARE A BYTE, B ADDRESS;
+RETURN;
+END F;
+CALL F(11H, 2222H);
+EOF
+
+# a byte argument widens to fill an ADDRESS parameter
+t_grep proc-addr-widens "ld h, 0" "pop bc" <<'EOF'
+F: PROCEDURE(P);
+DECLARE P ADDRESS;
+RETURN;
+END F;
+DECLARE X BYTE;
+CALL F(X);
+EOF
+
+# an ADDRESS parameter can be read and returned
+t_ok proc-addr-param-body <<'EOF'
+F: PROCEDURE(P, Q) ADDRESS;
+DECLARE P ADDRESS, Q ADDRESS;
+RETURN P + Q;
+END F;
+DECLARE R ADDRESS;
+R = F(1, 2);
+EOF
 
 # --- labels -------------------------------------------------
 
