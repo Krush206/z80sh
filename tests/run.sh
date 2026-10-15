@@ -1060,8 +1060,11 @@ DECLARE Y BYTE
 Y = Z(0)
 EOF
 
-t_err array-addr-array 255 "ADDRESS arrays" <<'EOF'
-DECLARE P(10) ADDRESS
+t_grep array-address "ld \(p\), hl" "add hl, de" <<'EOF'
+DECLARE P ADDRESS
+DECLARE A(4) ADDRESS
+P = 1000
+A(0) = P + P
 EOF
 
 t_err array-size-zero 255 "syntax error" <<'EOF'
