@@ -257,11 +257,17 @@ star:
 {
 	int rdstat;
 	char cc;
+	static int eofSeen;
 
 	if((rdstat = read(0, &cc, 1)) != 1) {
-		if(rdstat==0)
+		if(rdstat != 0)
+			exit(255); /* error */
+		/* a final line without a newline still compiles:
+		   hand back one newline, then end the program */
+		if(eofSeen)
 			[self endOfFile];
-		else exit(255); /* error */
+		eofSeen = 1;
+		return('\n');
 	}
 	return(cc);
 }
