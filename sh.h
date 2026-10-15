@@ -102,7 +102,6 @@
 #define LABSIZ 32
 #define PROCSIZ 16
 #define MAXPARS 16
-#define ORGADR 0
 #define RAMSTART 0xC000
 #define RAMSIZE 0x2000
 #define STACKP 0xDFF8
@@ -115,6 +114,7 @@
 #define ERR_REDECL ": redeclared"
 #define ERR_UNDECL ": undeclared"
 #define ERR_OPT ": unknown option"
+#define ERR_ORG ": invalid address"
 
 struct Keyword {
 	const char *kname;
@@ -155,7 +155,7 @@ struct Tree {
 	int *scope;
 	int *lblc;
 	int *orgflg;
-	int *orgen;
+	int *orgadr;
 	int *carten;
 	int *treec;
 	int *errval;
@@ -246,6 +246,7 @@ struct Tree {
 - (struct Tree *) callDec: (char **) lp end: (char **) rp;
 - (char **) findAssign: (char **) p1 end: (char **) p2;
 - (int) numberValue: (char *) s;
+- (int) orgValue: (char *) s;
 - (struct Tree *) arrayDecl: (char **) p1 args: (char **) lp end: (char **) rp;
 - (struct Tree *) groupDecl: (char **) p1 args: (char **) lp end: (char **) rp;
 - (struct Tree *) subscript: (char *) na args: (char **) lp end: (char **) rp;
@@ -282,7 +283,7 @@ struct Tree {
 - (int *) getScope;
 - (int *) getRamPointer;
 - (int *) getOrgFlag;
-- (int *) getOrgEnable;
+- (int *) getOrgAddress;
 - (int *) getCartEnable;
 - (int *) getMacroCount;
 - (int *) getLabCount;
