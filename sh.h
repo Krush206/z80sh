@@ -112,6 +112,7 @@
 #define ERR_ARGS "Too many args"
 #define ERR_REDECL ": redeclared"
 #define ERR_UNDECL ": undeclared"
+#define ERR_OPT ": unknown option"
 
 struct Keyword {
 	const char *kname;
@@ -152,6 +153,8 @@ struct Tree {
 	int *scope;
 	int *lblc;
 	int *orgflg;
+	int *orgen;
+	int *carten;
 	int *treec;
 	int *errval;
 	char **linep;
@@ -276,6 +279,8 @@ struct Tree {
 - (int *) getScope;
 - (int *) getRamPointer;
 - (int *) getOrgFlag;
+- (int *) getOrgEnable;
+- (int *) getCartEnable;
 - (int *) getMacroCount;
 - (int *) getLabCount;
 - (int *) getProcCount;
