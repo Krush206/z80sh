@@ -18,8 +18,10 @@ outside the language (no C-like spellings) is accepted.
   `LINE$COUNT` and `LINECOUNT` name one variable.
 - Comments are `/* ... */` only.
 - One input line compiles alone unless a `DO`/`END` group
-  spans lines, so keep `ELSE` on the same line as its `IF`
-  or wrap the statement in a `DO` group.
+  or a `PROCEDURE` body spans lines, so keep `ELSE` on the
+  same line as its `IF` or wrap the statement in a `DO`
+  group. A final line without a trailing newline still
+  compiles.
 
 ## Character set
 
@@ -47,11 +49,15 @@ rejects the rest as undeclared rather than misreading them.
 
 ## Data types
 
-- `BYTE`: 8-bit values. Supported.
-- `ADDRESS`: 16-bit values. Supported for storage
-  (`DECLARE x ADDRESS` reserves two bytes); 16-bit
-  arithmetic is planned.
-- Arrays of either type, with subscripts from 0: planned.
+- `BYTE`: 8-bit values, returned in `A`. Supported.
+- `ADDRESS`: 16-bit values, returned in `HL` and stored
+  as two bytes; an expression is 16-bit when either
+  operand is, after the PL/M-80 promotion rules.
+  Supported, with 16-bit `+ - OR XOR AND` and
+  comparisons.
+- Arrays of either type, with subscripts from 0:
+  supported; an `ADDRESS` array indexes two bytes per
+  element.
 - `BASED` variables addressed through a pointer: planned.
   Until then, pointer dereference is spelled `*p`.
 
@@ -63,8 +69,8 @@ rejects the rest as undeclared rather than misreading them.
   Supported; values must fit 16 bits.
 - Character strings in apostrophes (`'A'`, doubled internal
   quotes). Length 1 is a `BYTE`, length 2 an `ADDRESS`.
-  Supported for length 1; longer strings are planned
-  (they need the dot operator).
+  Supported, including longer strings in `DATA` and
+  `INITIAL` lists.
 
 ## Expressions
 
@@ -78,14 +84,15 @@ Precedence, highest first:
     AND
     OR  XOR
 
-- Arithmetic (`+ - * / MOD PLUS MINUS`): supported on byte
-  values. `*` and `/` producing `ADDRESS`, and carry
-  semantics for `PLUS`/`MINUS`, are planned.
-- Boolean (`NOT AND OR XOR`): supported. Operands and
-  results are bytes today; `ADDRESS` operands with
-  zero-extension are planned.
-- Relational (`< <= = >= > <>`): supported. Full PL/M
-  returns `0FFH` for true and `00H` for false; the
+- Arithmetic (`+ - * / MOD PLUS MINUS`): `+` and `-` are
+  supported at 16 bits, promoting to `ADDRESS` when either
+  operand is. `*`, `/` and `MOD` stay 8-bit unless an
+  operand is `ADDRESS`, and carry semantics for
+  `PLUS`/`MINUS` are planned.
+- Boolean (`NOT AND OR XOR`): supported, at 16 bits with
+  `ADDRESS` operands.
+- Relational (`< <= = >= > <>`): supported at both widths.
+  Full PL/M returns `0FFH` for true and `00H` for false; the
   compiler currently returns 1 and 0, which `IF` and
   `DO WHILE` test the same way. The `0FFH` convention
   is planned.
@@ -120,11 +127,14 @@ branch, so prefer a variable there.
 - `IF expression THEN stmt;` and
   `IF expression THEN stmt; ELSE stmt;`: supported.
   `ELSE` binds to the nearest open `IF`.
-- `GOTO`/`GO TO` with labels: planned.
+- `GOTO label;` and `GO TO label;`: supported. A label is
+  declared implicitly by `label: statement;`; forward
+  references resolve in the assembler.
 - `DISABLE;` / `ENABLE;` (interrupts off/on): supported.
 - `HALT;`: supported.
-- `CALL name(args);` and procedure calls in expressions:
-  planned, with procedures themselves.
+- `CALL name;` and `CALL name(args);` invoke a void
+  procedure. A typed procedure is called in an
+  expression: `x = f(a, b);`. Both are supported.
 
 ## Declarations
 
@@ -132,35 +142,54 @@ Supported today:
 
     DECLARE name BYTE;
     DECLARE name ADDRESS;
-    DECLARE name (size) BYTE;   arrays, subscripts 0..size-1
+    DECLARE (a, b, ...) BYTE;      group form
+    DECLARE name (size) BYTE;      arrays, subscripts 0..size-1
+    DECLARE name BYTE INITIAL (v, ...);   preset bytes
+    DECLARE name DATA (v, ...);    ROM-resident bytes
+    DECLARE name LITERALLY 'text'; source substitution
 
 Array elements read and write with `A(i)` for any byte
-index expression, nesting included. `LENGTH(A)` folds to
-the element count and `LAST(A)` to the highest subscript.
-Sizes take full PL/M numbers (`10`, `0AH`, `101B`, `1$0`);
-at most 255 elements, since subscripts are bytes. Bare
-array names are rejected in expressions, and `ADDRESS`
-arrays stay an error until 16-bit values exist.
+index expression, nesting included; `ADDRESS` arrays index
+two bytes per element. `LENGTH(A)` folds to the element
+count and `LAST(A)` to the highest subscript. Sizes take
+full PL/M numbers (`10`, `0AH`, `101B`, `1$0`); at most
+255 elements, since subscripts are bytes. Bare array names
+are rejected in expressions.
+
+`INITIAL` writes ROM-resident values then copies them into
+the variable at its declaration, so the storage is preset
+at run time; `DATA` names ROM-resident bytes directly and
+takes no writable storage. A `LITERALLY` macro substitutes
+its text at parse time and declares no storage.
 
 Planned, in this order:
 
-    DECLARE (a, b, ...) BYTE;      group form
-    ... INITIAL(v, ...);            preset values
-    DECLARE name DATA (...);        storage constants
-    DECLARE name LITERALLY '...';   source substitution
     DECLARE x LABEL;                labels
     DECLARE p ADDRESS, v BASED p BYTE;
 
 ## Procedures
 
-Planned:
+Supported:
 
     name: PROCEDURE (args) type;
+        DECLARE arg BYTE; ...;
         statement; ...;
     END name;
 
-with `RETURN;` / `RETURN expression;`, non-recursive calls,
-and `INTERRUPT n` handlers for `n` in 0–7.
+Parameters are `BYTE`; they are declared at the top of the
+body in header order, exactly as in PL/M-80. The result is
+`BYTE` (left in `A`) or `ADDRESS` (left in `HL`); a void
+procedure is invoked with `CALL` and a typed one in an
+expression, again after PL/M-80. `RETURN;` and
+`RETURN expression;` both work.
+
+Calls follow the PL/M-80 convention: the last two arguments
+arrive in `E` and `C`, earlier ones on the stack (deepest
+first), and arguments evaluate left to right. Procedures are
+non-recursive, since parameters live in static storage.
+
+Planned: `INTERRUPT n` handlers for `n` in 0–7, and
+`ADDRESS` parameters.
 
 ## Built-in procedures
 
@@ -196,7 +225,7 @@ never freed) and run the suite:
 
 The suite rebuilds the compiler and checks exit codes,
 diagnostics, emitted assembly and final image bytes for
-127 programs, including one rejection test per non-PL/M
+172 programs, including one rejection test per non-PL/M
 spelling (`int`, `==`, `!=`, `!`, `&&`, `||`, `&`, `|`,
 `^`, `%`, bare `WHILE`, `THEN`-less `IF`, `{`/`}`,
 `//` comments).
