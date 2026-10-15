@@ -116,7 +116,6 @@ static struct Keyword keyw[] = {
  */
 - (struct Tree *) headparse: (char **) p1 end: (char **) p2
 {
-	register char **ep;
 	register int k;
 
 	if(p1 == p2)
@@ -158,15 +157,12 @@ static struct Keyword keyw[] = {
 	if(k == TDO) {
 		char **m;
 
-		/* a DO range parses only through its matching END */
+		/* a DO range parses only through its matching END,
+		   which may carry the module name (END name;) */
 		m = [self matchEnd: p1 end: p2];
 		if(m == 0)
 			return(0);
-		ep = p2;
-		while(ep != m+1 && (*(ep-1))[1] == '\0' &&
-		    (**(ep-1) == ';' || **(ep-1) == '\n'))
-			ep--;
-		if(ep != m+1)
+		if([self endPast: m end: p2] == 0)
 			return(0);
 		return [self statement: p1 end: m+1];
 	}
@@ -378,9 +374,25 @@ static struct Keyword keyw[] = {
 	t->DTYP = TPROCEDURE;
 	t->DARR[0] = *p1;
 	t->DARR[1] = 0;
+	t->DARR[4] = 0;
 	if(q != m && ([self wordIs: *q name: "byte"] ||
 	    [self wordIs: *q name: "address"])) {
 		t->DARR[1] = *q;
+		q++;
+	}
+	/* optional INTERRUPT n; such a procedure is void and
+	   takes no parameters, as in PL/M-80 */
+	if(q != m && [self wordIs: *q name: "interrupt"]) {
+		if(lp != 0 || t->DARR[1] != 0) {
+			[self error: ERR_SYNTAX code: 255];
+			return(0);
+		}
+		q++;
+		if(q == m) {
+			[self error: ERR_SYNTAX code: 255];
+			return(0);
+		}
+		t->DARR[4] = *q;
 		q++;
 	}
 	if(q == m || strcmp(*q, ";") != 0) {
@@ -902,7 +914,7 @@ static struct Keyword keyw[] = {
 - (struct Tree *) doStatement: (char **) p1 end: (char **) p2
 {
 	char **p;
-	char **m, **q, **semi, **topos, **ep;
+	char **m, **q, **semi, **topos;
 	char *var;
 	struct Tree *t, *e1, *e2, *body;
 	struct Tree *v1, *v2, *v3, *v4, *n1;
@@ -912,15 +924,7 @@ static struct Keyword keyw[] = {
 	int k, i;
 
 	m = [self matchEnd: p1 end: p2];
-	if(m == 0) {
-		[self error: ERR_SYNTAX code: 255];
-		return(0);
-	}
-	ep = p2;
-	while(ep != m+1 && (*(ep-1))[1] == '\0' &&
-	    (**(ep-1) == ';' || **(ep-1) == '\n'))
-		ep--;
-	if(ep != m+1) {
+	if(m == 0 || [self endPast: m end: p2] == 0) {
 		[self error: ERR_SYNTAX code: 255];
 		return(0);
 	}
@@ -937,7 +941,9 @@ static struct Keyword keyw[] = {
 		q = semi+1;
 		while(q != m && (strcmp(*q, ";") == 0 || strcmp(*q, "\n") == 0))
 			q++;
-		t->DRIT = [self syn1: q end: m];
+		t->DRIT = 0;
+		if(q != m)
+			t->DRIT = [self syn1: q end: m];
 		return(t);
 	}
 	if(p != m && [self wordIs: *p name: "case"]) {
@@ -991,7 +997,9 @@ static struct Keyword keyw[] = {
 		q = semi+1;
 		while(q != m && (strcmp(*q, ";") == 0 || strcmp(*q, "\n") == 0))
 			q++;
-		body = [self syn1: q end: m];
+		body = 0;
+		if(q != m)
+			body = [self syn1: q end: m];
 		v1 = [self tree];
 		v1->DTYP = TVAR;
 		v1->DARR[0] = var;
@@ -1040,7 +1048,9 @@ static struct Keyword keyw[] = {
 	while(p != m && (strcmp(*p, ";") == 0 || strcmp(*p, "\n") == 0))
 		p++;
 	t->DTYP = TBLOCK;
-	t->DLEF = [self syn1: p end: m];
+	t->DLEF = 0;
+	if(p != m)
+		t->DLEF = [self syn1: p end: m];
 	return(t);
 }
 
@@ -1764,7 +1774,8 @@ static struct Keyword keyw[] = {
 		}
 		if(l != 0)
 			continue;
-		if([self wordIs: *p name: "do"]) {
+		if([self wordIs: *p name: "do"] ||
+		    [self wordIs: *p name: "procedure"]) {
 			dd++;
 			continue;
 		}
@@ -1776,6 +1787,32 @@ static struct Keyword keyw[] = {
 		return(p);
 	}
 	return(0);
+}
+
+/*
+ * endPast
+ *	the position just past the END at m, its optional
+ *	module name and the trailing ; and newlines, or 0
+ *	when other tokens follow; M: DO .. END M; is the
+ *	module wrapper the reference compiler expects
+ */
+- (char **) endPast: (char **) m end: (char **) p2
+{
+	char **ep;
+
+	ep = p2;
+	while(ep != m+1 && (*(ep-1))[1] == '\0' &&
+	    (**(ep-1) == ';' || **(ep-1) == '\n'))
+		ep--;
+	if(ep != m+1 && [self nameOk: *(ep-1)] &&
+	    [self srchx: *(ep-1)] == -1)
+		ep--;
+	while(ep != m+1 && (*(ep-1))[1] == '\0' &&
+	    (**(ep-1) == ';' || **(ep-1) == '\n'))
+		ep--;
+	if(ep != m+1)
+		return(0);
+	return(ep);
 }
 
 /*
@@ -2420,6 +2457,13 @@ static struct Keyword keyw[] = {
 			t->DTYP = TDECL;
 		else if([self wordIs: w[2] name: "address"])
 			t->DTYP = TADDR;
+		else if([self wordIs: w[2] name: "label"]) {
+			/* a label declares no storage: its address
+			   is the statement that carries the name */
+			t->DTYP = TNOP;
+			t->DARR[0] = w[1];
+			return(t);
+		}
 		else {
 			[self error: ERR_SYNTAX code: 255];
 			return(0);
