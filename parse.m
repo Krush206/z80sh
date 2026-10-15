@@ -374,7 +374,7 @@ static struct Keyword keyw[] = {
 	t->DTYP = TPROCEDURE;
 	t->DARR[0] = *p1;
 	t->DARR[1] = 0;
-	t->DARR[4] = 0;
+	t->DINT = 0;
 	if(q != m && ([self wordIs: *q name: "byte"] ||
 	    [self wordIs: *q name: "address"])) {
 		t->DARR[1] = *q;
@@ -392,7 +392,7 @@ static struct Keyword keyw[] = {
 			[self error: ERR_SYNTAX code: 255];
 			return(0);
 		}
-		t->DARR[4] = *q;
+		t->DINT = *q;
 		q++;
 	}
 	if(q == m || strcmp(*q, ";") != 0) {
