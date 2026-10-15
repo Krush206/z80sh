@@ -1389,7 +1389,7 @@ static int leadingDecls(struct Tree *body, struct Tree **dst, int max)
  */
 - (void) defineProc: (struct Tree *) t
 {
-	int pi, npar, np, ret, i, n, lv, ra, skip, ip;
+	int pi, npar, np, ret, i, n, lv, skip, ip;
 	struct Tree *decls[MAXPARS];
 	char *s, *d;
 
@@ -1423,10 +1423,11 @@ static int leadingDecls(struct Tree *body, struct Tree **dst, int max)
 	/* interrupt procedures are void and parameterless and
 	   save every register across the handler */
 	ip = t->DINT != 0;
-	/* params become block-level storage */
+	/* params take their own static storage, as in PL/M-80;
+	   their names leave scope with the body, but the RAM
+	   stays allocated so no enclosing variable overlays it */
 	lv = *scope;
 	n = *symc;
-	ra = *ramc;
 	(*scope)++;
 	*inProc = pi + 1;
 	skip = (*lblc)++;
@@ -1496,7 +1497,6 @@ static int leadingDecls(struct Tree *body, struct Tree **dst, int max)
 	printf("L%d:\n", skip);
 	*inProc = 0;
 	*symc = n;
-	*ramc = ra;
 	*scope = lv;
 }
 
