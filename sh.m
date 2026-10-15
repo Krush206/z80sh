@@ -59,7 +59,7 @@ main(int c, char *av[])
 	(void) [sh getScope];
 	(void) [sh getRamPointer];
 	(void) [sh getOrgFlag];
-	(void) [sh getOrgEnable];
+	(void) [sh getOrgAddress];
 	(void) [sh getCartEnable];
 	(void) [sh getMacroCount];
 	(void) [sh getLabCount];
@@ -67,7 +67,19 @@ main(int c, char *av[])
 	(void) [sh getInProc];
 	for(v = av+1; v < av+c; v++) {
 		if(strcmp(*v, "-o") == 0) {
-			*[sh getOrgEnable] = 1;
+			int addr;
+
+			if(v+1 == av+c) {
+				[sh printString: *v];
+				[sh error: ERR_ORG code: 255];
+			}
+			v++;
+			addr = [sh orgValue: *v];
+			if(addr < 0) {
+				[sh printString: *v];
+				[sh error: ERR_ORG code: 255];
+			}
+			*[sh getOrgAddress] = addr;
 			continue;
 		}
 		if(strcmp(*v, "-h") == 0) {
