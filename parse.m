@@ -347,7 +347,7 @@ static struct Keyword keyw[] = {
 - (struct Tree *) procDef: (char **) p1 end: (char **) p2
 {
 	register struct Tree *t;
-	char **m, **e, **q, **lp, **rp;
+	char **m, **e, **q, **lp, **rp, **bs;
 	int n;
 
 	/* trailing separators past END name are noise */
@@ -355,11 +355,7 @@ static struct Keyword keyw[] = {
 	while(e != p1+3 && (*(e-1))[1] == '\0' &&
 	    (**(e-1) == ';' || **(e-1) == '\n'))
 		e--;
-	m = [self matchProc: p1 end: e];	{ char **db;
-	  fprintf(stderr, "DBG-procDef whole:");
-	  for(db = p1; db != e; db++)
-		fprintf(stderr, " %s|", *db ? *db : "-");
-	  fprintf(stderr, " m=%ld\n", m ? (long)(m-p1) : -2L); }
+	m = [self matchProc: p1 end: e];
 	if(m == 0) {
 		[self error: ERR_SYNTAX code: 255];
 		return(0);
@@ -391,28 +387,29 @@ static struct Keyword keyw[] = {
 		[self error: ERR_SYNTAX code: 255];
 		return(0);
 	}
+	/* the body follows the header's closing ; */
+	bs = q+1;
 	n = 0;
 	if(lp != 0) {
-		char **seg;
+		char **seg, **pp;
 
 		seg = lp;
-		for(q = lp; ; q++) {
-			if(q == rp || strcmp(*q, ",") == 0) {
-			fprintf(stderr, "DBG-par q=%ld seg=%ld\n", (long)(q-p1), (long)(seg-p1));
-			if(q != seg+1 || ![self nameOk: *seg] ||
-				    [self srchx: *seg] != -1) {
-					[self error: ERR_SYNTAX code: 255];
-					return(0);
-				}
-				if(n == MAXPARS) {
-					[self error: ERR_LARGE code: 255];
-					return(0);
-				}
-				t->DARR[3 + n++] = *seg;
-				if(q == rp)
-					break;
-				seg = q+1;
+		for(pp = lp; ; pp++) {
+			if(pp != rp && strcmp(*pp, ",") != 0)
+				continue;
+			if(pp != seg+1 || ![self nameOk: *seg] ||
+			    [self srchx: *seg] != -1) {
+				[self error: ERR_SYNTAX code: 255];
+				return(0);
 			}
+			if(n == MAXPARS) {
+				[self error: ERR_LARGE code: 255];
+				return(0);
+			}
+			t->DARR[3 + n++] = *seg;
+			if(pp == rp)
+				break;
+			seg = pp+1;
 		}
 	}
 	t->DARR[2] = strdup([self integerToASCII: n]);
@@ -421,7 +418,7 @@ static struct Keyword keyw[] = {
 		[self error: ERR_SYNTAX code: 255];
 		return(0);
 	}
-	t->DLEF = [self syn1: q+1 end: m];
+	t->DLEF = [self syn1: bs end: m];
 	return(t);
 }
 
@@ -739,7 +736,7 @@ static struct Keyword keyw[] = {
 - (struct Tree *) callStmt: (char **) p1 end: (char **) p2
 {
 	register struct Tree *t;
-	char **q, **seg, **lp, **rp;
+	char **q, **lp, **rp;
 
 	t = [self tree];
 	t->DTYP = TCALL;
@@ -769,24 +766,126 @@ static struct Keyword keyw[] = {
 		return(0);
 	}
 	t->DLEF = 0;
-	if(lp != 0 && lp != rp) {
-		struct Tree *tail;
-
-		seg = lp;
-		for(q = lp; ; q++) {
-			if(q == rp || strcmp(*q, ",") == 0) {
-				tail = [self tree];
-				tail->DTYP = TLST;
-				tail->DLEF = [self syn2: seg end: q];
-				tail->DRIT = t->DLEF;
-				t->DLEF = tail;
-				if(q == rp)
-					break;
-				seg = q+1;
-			}
-		}
-	}
+	if(lp != 0)
+		t->DLEF = [self argList: lp end: rp];
 	return(t);
+}
+
+/*
+ * argList
+ *	split the argument range lp..rp into a source-order
+ *	TLST chain, one syn2 per argument; a comma inside
+ *	nested parens does not separate, and an empty range
+ *	has no arguments
+ */
+- (struct Tree *) argList: (char **) lp end: (char **) rp
+{
+	struct Tree *head, *tail, **link;
+	char **seg, **q;
+	int l;
+
+	if(lp == rp)
+		return(0);
+	head = 0;
+	link = &head;
+	seg = lp;
+	l = 0;
+	for(q = lp; q != rp; q++) {
+		if(strcmp(*q, "(") == 0) {
+			l++;
+			continue;
+		}
+		if(strcmp(*q, ")") == 0) {
+			l--;
+			continue;
+		}
+		if(l != 0 || strcmp(*q, ",") != 0)
+			continue;
+		tail = [self tree];
+		tail->DTYP = TLST;
+		tail->DLEF = [self syn2: seg end: q];
+		tail->DRIT = 0;
+		*link = tail;
+		link = &tail->DRIT;
+		seg = q+1;
+	}
+	tail = [self tree];
+	tail->DTYP = TLST;
+	tail->DLEF = [self syn2: seg end: rp];
+	tail->DRIT = 0;
+	*link = tail;
+	return(head);
+}
+
+/*
+ * literalDecl
+ *	DECLARE name LITERALLY 'text': record a parse-time
+ *	macro; it declares no storage and emits no code
+ */
+- (struct Tree *) literalDecl: (char *) na value: (char *) val
+{
+	struct Tree *t;
+	char *d;
+	unsigned char c;
+
+	if(*macc == MACSIZ) {
+		[self error: ERR_LARGE code: 255];
+	}
+	d = macnam[*macc];
+	while(*na) {
+		c = (unsigned char) *na++;
+		if(c == '$')
+			continue;
+		if(c >= 'A' && c <= 'Z')
+			c = c + 'a' - 'A';
+		if(d >= macnam[*macc] + SYMNAMSIZ - 1)
+			[self error: ERR_LARGE code: 255];
+		*d++ = (char) c;
+	}
+	*d = '\0';
+	d = macval[*macc];
+	while((c = (unsigned char) *val++) != 0) {
+		if(d >= macval[*macc] + MACVSIZ - 1)
+			[self error: ERR_LARGE code: 255];
+		*d++ = (char)(c & 0177);
+	}
+	*d = '\0';
+	maclev[*macc] = *scope;
+	(*macc)++;
+	t = [self tree];
+	t->DTYP = TNOP;
+	return(t);
+}
+
+/*
+ * macroValue
+ *	the text of the innermost LITERALLY macro named na,
+ *	or 0 when the name is not a macro
+ */
+- (char *) macroValue: (char *) na
+{
+	int i;
+
+	for(i = *macc - 1; i >= 0; i--)
+		if([self nameEq: macnam[i] other: na])
+			return macval[i];
+	return(0);
+}
+
+/*
+ * resolveMacro
+ *	follow a chain of LITERALLY macros from the word w
+ *	to its final text; a non-macro word is returned as is
+ */
+- (char *) resolveMacro: (char *) w
+{
+	char *v;
+	int guard;
+
+	guard = 0;
+	while(guard++ < MACSIZ && (v = [self macroValue: w]) != 0)
+		w = v;
+	return(w);
 }
 
 /*
@@ -1980,6 +2079,7 @@ static struct Keyword keyw[] = {
 		[self error: ERR_SYNTAX code: 255];
 		return(0);
 	}
+	lp[0] = [self resolveMacro: *lp];
 	size = [self numberValue: *lp];
 	if(size < 1) {
 		[self error: ERR_SYNTAX code: 255];
@@ -2047,7 +2147,7 @@ static struct Keyword keyw[] = {
 			[self error: ERR_LARGE code: 255];
 			return(-1);
 		}
-		dst[n++] = *c;
+		dst[n++] = [self resolveMacro: *c];
 		if(q == rp)
 			return(n);
 		c = q+1;
@@ -2091,15 +2191,19 @@ static struct Keyword keyw[] = {
 	if(lp == 0)
 		t->DARR[i++] = 0;
 	else
-		t->DARR[i++] = *lp;
-	if([self wordIs: p1[n-2] name: "byte"])
-		t->DARR[i++] = 0;
-	else if([self wordIs: p1[n-2] name: "address"])
-		t->DARR[i++] = "address";
-	else {
-		[self error: ERR_SYNTAX code: 255];
-		return(0);
+		t->DARR[i++] = [self resolveMacro: *lp];
+	if(n >= 4) {
+		if([self wordIs: p1[n-2] name: "byte"])
+			t->DARR[i++] = 0;
+		else if([self wordIs: p1[n-2] name: "address"])
+			t->DARR[i++] = "address";
+		else {
+			[self error: ERR_SYNTAX code: 255];
+			return(0);
+		}
 	}
+	else
+		t->DARR[i++] = 0;
 	m = [self collectValues: lp2 end: rp2 into: t->DARR + 4];
 	if(m < 0)
 		return(0);
@@ -2120,7 +2224,7 @@ static struct Keyword keyw[] = {
 	t = [self tree];
 	t->DTYP = TSUBSCRIPT;
 	t->DARR[0] = na;
-	t->DLEF = [self syn2: lp end: rp];
+	t->DLEF = [self argList: lp end: rp];
 	return(t);
 }
 
@@ -2208,13 +2312,18 @@ static struct Keyword keyw[] = {
 			return [self arrayInfo: k args: lp end: rp];
 		if(n == 1 && k == -1)
 			return [self subscript: w[0] args: lp end: rp];
-		if(n == 3 && [self srchx: w[0]] == TDECL)
+		if(n == 3 && [self srchx: w[0]] == TDECL &&
+		    ([self wordIs: w[2] name: "byte"] ||
+		     [self wordIs: w[2] name: "address"]))
 			return [self arrayDecl: w args: lp end: rp];
 		if(n == 2 && [self srchx: w[0]] == TDECL)
 			return [self groupDecl: w args: lp end: rp];
 		if(n >= 3 && [self srchx: w[0]] == TDECL &&
-		    [self wordIs: w[n-1] name: "data"])
+		    [self wordIs: w[n-1] name: "data"]) {
+			if(lp2 != 0)
+				return [self dataDecl: w args: lp2 end: rp2];
 			return [self dataDecl: w args: lp end: rp];
+		}
 		if(n >= 3 && [self srchx: w[0]] == TDECL &&
 		    [self wordIs: w[n-1] name: "initial"]) {
 			if(lp2 != 0)
@@ -2234,9 +2343,22 @@ static struct Keyword keyw[] = {
 		[self error: ERR_SYNTAX code: 255];
 		return(0);
 	}
+	/* a single word that names a LITERALLY macro stands
+	   for its text; chains of macros resolve in place */
+	if(n == 1)
+		w[0] = [self resolveMacro: w[0]];
 	switch(k = [self srchx: w[0]]) {
 
 	case TDECL:
+		/* DECLARE name LITERALLY 'text' defines a macro */
+		if(n == 4 && [self wordIs: w[2] name: "literally"]) {
+			if([self srchx: w[1]] != -1 ||
+			    ![self nameOk: w[1]]) {
+				[self error: ERR_SYNTAX code: 255];
+				return(0);
+			}
+			return [self literalDecl: w[1] value: w[3]];
+		}
 		/* DECLARE name BYTE, DECLARE name ADDRESS, and
 		   the comma-split DECLARE a type, b type, ... */
 		if(n > 3) {
