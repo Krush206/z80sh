@@ -121,9 +121,40 @@ static struct Keyword keyw[] = {
 
 	if(p1 == p2)
 		return(0);
+	/* name: PROCEDURE ... END name; spans statements */
+	if(p2 >= p1+3 && [self nameOk: *p1] &&
+	    [self srchx: *p1] == -1 && strcmp(*(p1+1), ":") == 0 &&
+	    [self wordIs: *(p1+2) name: "procedure"])
+		return [self statement: p1 end: p2];
+	/* label: statement — plain or structured */
+	if(p2 >= p1+2 && strcmp(*(p1+1), ":") == 0 &&
+	    [self srchx: *p1] == -1 && [self nameOk: *p1]) {
+		struct Tree *lab, *body, *both;
+
+		lab = [self tree];
+		lab->DTYP = TLDEF;
+		lab->DARR[0] = *p1;
+		body = [self syn1: p1+2 end: p2];
+		both = [self tree];
+		both->DTYP = TLST;
+		both->DLEF = lab;
+		both->DRIT = body;
+		return(both);
+	}
 	k = [self srchx: *p1];
 	if(k == TIF)
 		return [self statement: p1 end: p2];
+	if(k == TCALL || k == TRETURN || k == TGOTO || k == TGO) {
+		char **sp;
+
+		/* statement() parses a lone statement range; with
+		   more statements following, step back and let
+		   syn1 split the list first */
+		for(sp = p1; sp != p2; sp++)
+			if(**sp == ';' || **sp == '\n')
+				return(0);
+		return [self statement: p1 end: p2];
+	}
 	if(k == TDO) {
 		char **m;
 
@@ -191,13 +222,17 @@ static struct Keyword keyw[] = {
 
 	l = 0;
 	dd = 0;
+	/* leading separators carry no statement */
+	while(p1 != p2 && (**p1 == ';' || **p1 == '\n'))
+		p1++;
 	if(p1 != p2) {
 		t = [self headparse: p1 end: p2];
 		if(t != 0)
 			return(t);
 	}
 	for(p=p1; p!=p2; p++) {
-		if(l == 0 && [self wordIs: *p name: "do"])
+		if(l == 0 && ([self wordIs: *p name: "do"] ||
+		    [self wordIs: *p name: "procedure"]))
 			dd++;
 		else if(l == 0 && [self wordIs: *p name: "end"])
 			dd--;
@@ -309,6 +344,100 @@ static struct Keyword keyw[] = {
  * syn3; conditions run through syn3 rather than syn2 so
  * that a PL/M = inside one compares instead of assigning
  */
+- (struct Tree *) procDef: (char **) p1 end: (char **) p2
+{
+	register struct Tree *t;
+	char **m, **e, **q, **lp, **rp;
+	int n;
+
+	/* trailing separators past END name are noise */
+	e = p2;
+	while(e != p1+3 && (*(e-1))[1] == '\0' &&
+	    (**(e-1) == ';' || **(e-1) == '\n'))
+		e--;
+	m = [self matchProc: p1 end: e];	{ char **db;
+	  fprintf(stderr, "DBG-procDef whole:");
+	  for(db = p1; db != e; db++)
+		fprintf(stderr, " %s|", *db ? *db : "-");
+	  fprintf(stderr, " m=%ld\n", m ? (long)(m-p1) : -2L); }
+	if(m == 0) {
+		[self error: ERR_SYNTAX code: 255];
+		return(0);
+	}
+	/* optional parameter list right after PROCEDURE */
+	q = p1+3;
+	lp = 0;
+	rp = 0;
+	if(q != m && strcmp(*q, "(") == 0) {
+		lp = q+1;
+		rp = [self matchParen: q end: m];
+		if(rp == 0) {
+			[self error: ERR_SYNTAX code: 255];
+			return(0);
+		}
+		q = rp+1;
+	}
+	/* optional BYTE or ADDRESS result type */
+	t = [self tree];
+	t->DTYP = TPROCEDURE;
+	t->DARR[0] = *p1;
+	t->DARR[1] = 0;
+	if(q != m && ([self wordIs: *q name: "byte"] ||
+	    [self wordIs: *q name: "address"])) {
+		t->DARR[1] = *q;
+		q++;
+	}
+	if(q == m || strcmp(*q, ";") != 0) {
+		[self error: ERR_SYNTAX code: 255];
+		return(0);
+	}
+	n = 0;
+	if(lp != 0) {
+		char **seg;
+
+		seg = lp;
+		for(q = lp; ; q++) {
+			if(q == rp || strcmp(*q, ",") == 0) {
+			fprintf(stderr, "DBG-par q=%ld seg=%ld\n", (long)(q-p1), (long)(seg-p1));
+			if(q != seg+1 || ![self nameOk: *seg] ||
+				    [self srchx: *seg] != -1) {
+					[self error: ERR_SYNTAX code: 255];
+					return(0);
+				}
+				if(n == MAXPARS) {
+					[self error: ERR_LARGE code: 255];
+					return(0);
+				}
+				t->DARR[3 + n++] = *seg;
+				if(q == rp)
+					break;
+				seg = q+1;
+			}
+		}
+	}
+	t->DARR[2] = strdup([self integerToASCII: n]);
+	/* the body ends at END, the optional name follows */
+	if(m+1 != e && ![self nameEq: *(m+1) other: *p1]) {
+		[self error: ERR_SYNTAX code: 255];
+		return(0);
+	}
+	t->DLEF = [self syn1: q+1 end: m];
+	return(t);
+}
+
+/*
+ * statement
+ *	if ( syn3 ) THEN syn1
+ *	if ( syn3 ) THEN syn1 else syn1
+ *	if syn3 THEN syn1 [ELSE syn1]
+ *	doStatement, below
+ *
+ * bodies are single line ranges; syn1 parses them so they
+ * nest, chain with ; and form DO..END groups; an else past
+ * any nested ifs belongs to this if, after the C shell's
+ * syn3; conditions run through syn3 rather than syn2 so
+ * that a PL/M = inside one compares instead of assigning
+ */
 - (struct Tree *) statement: (char **) p1 end: (char **) p2
 {
 	register char **p;
@@ -322,6 +451,45 @@ static struct Keyword keyw[] = {
 	k = [self srchx: *p1];
 	if(k == TDO)
 		return [self doStatement: p1 end: p2];
+	if(p2 >= p1+3 && [self nameOk: *p1] && [self srchx: *p1] == -1 &&
+	    strcmp(*(p1+1), ":") == 0 &&
+	    [self wordIs: *(p1+2) name: "procedure"])
+		return [self procDef: p1 end: p2];
+	if(k == TCALL)
+		return [self callStmt: p1 end: p2];
+	if(k == TRETURN) {
+		/* RETURN; / RETURN expr; — trailing ; dropped */
+		while(p2 != p1 && (*(p2-1))[1] == '\0' &&
+		    (**(p2-1) == ';' || **(p2-1) == '\n'))
+			p2--;
+		t = [self tree];
+		t->DTYP = TRETURN;
+		if(p2 > p1+1)
+			t->DLEF = [self syn2: p1+1 end: p2];
+		else
+			t->DLEF = 0;
+		return(t);
+	}
+	if(k == TGOTO || (k == TGO && p2 >= p1+3 &&
+	    [self wordIs: *(p1+1) name: "to"])) {
+		char **np;
+
+		/* GOTO label / GO TO label; trailing separators
+		   from the enclosing statement list do not count */
+		while(p2 != p1 && (*(p2-1))[1] == '\0' &&
+		    (**(p2-1) == ';' || **(p2-1) == '\n'))
+			p2--;
+		np = (k == TGOTO) ? p1+1 : p1+2;
+		if(p2 != np+1 || ![self nameOk: *np] ||
+		    [self srchx: *np] != -1) {
+			[self error: ERR_SYNTAX code: 255];
+			return(0);
+		}
+		t = [self tree];
+		t->DTYP = TGOTO;
+		t->DARR[0] = *np;
+		return(t);
+	}
 	if(p2 >= p1+2 && strcmp(*(p1+1), "(") == 0) {
 		rp = [self matchParen: p1+1 end: p2];
 		if(rp == 0) {
@@ -561,6 +729,64 @@ static struct Keyword keyw[] = {
 		return(q);
 	}
 	return(0);
+}
+
+/*
+ * callStmt
+ *	CALL name; or CALL name(expr, ...); — a TCALL node
+ *	with one TLST per argument expression in DLEF
+ */
+- (struct Tree *) callStmt: (char **) p1 end: (char **) p2
+{
+	register struct Tree *t;
+	char **q, **seg, **lp, **rp;
+
+	t = [self tree];
+	t->DTYP = TCALL;
+	/* trailing separators past the call tail are noise */
+	while(p2 != p1 && (*(p2-1))[1] == '\0' &&
+	    (**(p2-1) == ';' || **(p2-1) == '\n'))
+		p2--;
+	q = p1+1;
+	if(q == p2 || [self srchx: *q] != -1 || ![self nameOk: *q]) {
+		[self error: ERR_SYNTAX code: 255];
+		return(0);
+	}
+	t->DARR[0] = *q;
+	q++;
+	lp = 0;
+	if(q != p2 && strcmp(*q, "(") == 0) {
+		rp = [self matchParen: q end: p2];
+		if(rp == 0) {
+			[self error: ERR_SYNTAX code: 255];
+			return(0);
+		}
+		lp = q+1;
+		q = rp+1;
+	}
+	if(q != p2) {
+		[self error: ERR_SYNTAX code: 255];
+		return(0);
+	}
+	t->DLEF = 0;
+	if(lp != 0 && lp != rp) {
+		struct Tree *tail;
+
+		seg = lp;
+		for(q = lp; ; q++) {
+			if(q == rp || strcmp(*q, ",") == 0) {
+				tail = [self tree];
+				tail->DTYP = TLST;
+				tail->DLEF = [self syn2: seg end: q];
+				tail->DRIT = t->DLEF;
+				t->DLEF = tail;
+				if(q == rp)
+					break;
+				seg = q+1;
+			}
+		}
+	}
+	return(t);
 }
 
 /*
@@ -1256,6 +1482,78 @@ static struct Keyword keyw[] = {
 }
 
 /*
+ * nameEq
+ *	true when the words a and b spell the same name,
+ *	case-insensitive with $ signs ignored
+ */
+- (int) nameEq: (char *) a other: (char *) b
+{
+	unsigned char c, d;
+
+	if(a == 0 || b == 0)
+		return(0);
+	for(;;) {
+		c = (unsigned char) *a;
+		if(c == '$') {
+			a++;
+			continue;
+		}
+		d = (unsigned char) *b;
+		if(d == '$') {
+			b++;
+			continue;
+		}
+		if(c >= 'A' && c <= 'Z')
+			c = c + 'a' - 'A';
+		if(d >= 'A' && d <= 'Z')
+			d = d + 'a' - 'A';
+		if(c != d)
+			return(0);
+		if(c == '\0')
+			return(1);
+		a++;
+		b++;
+	}
+}
+
+/*
+ * matchProc
+ *	the END word closing the PROCEDURE at p1, or 0 when
+ *	the range holds none; nested DO..END groups skip
+ */
+- (char **) matchProc: (char **) p1 end: (char **) p2
+{
+	char **q;
+	int l, dd;
+
+	l = 0;
+	dd = 0;
+	for(q = p1; q != p2; q++) {
+		if(strcmp(*q, "(") == 0) {
+			l++;
+			continue;
+		}
+		if(strcmp(*q, ")") == 0) {
+			l--;
+			continue;
+		}
+		if(l != 0)
+			continue;
+		if([self wordIs: *q name: "do"] ||
+		    [self wordIs: *q name: "procedure"]) {
+			dd++;
+			continue;
+		}
+		if(dd != 0 && [self wordIs: *q name: "end"]) {
+			dd--;
+			if(dd == 0)
+				return(q);
+		}
+	}
+	return(0);
+}
+
+/*
  * wordIs
  *	true when the lexer word w spells the lower case
  *	name s under the same canonicalization srchx uses;
@@ -1304,8 +1602,10 @@ static struct Keyword keyw[] = {
 
 /*
  * doDepth
- *	unmatched DO count in the word range; paren interiors
- *	do not count, and quoted words never match
+ *	unmatched block count in the word range; DO groups
+ *	and PROCEDURE definitions both need an END, so both
+ *	count; paren interiors do not count, and quoted
+ *	words never match
  */
 - (int) doDepth: (char **) p1 end: (char **) p2
 {
@@ -1330,7 +1630,8 @@ static struct Keyword keyw[] = {
 		}
 		if(l != 0)
 			continue;
-		if([self wordIs: *p name: "do"])
+		if([self wordIs: *p name: "do"] ||
+		    [self wordIs: *p name: "procedure"])
 			d++;
 		else if([self wordIs: *p name: "end"])
 			d--;
@@ -1668,13 +1969,10 @@ static struct Keyword keyw[] = {
 - (struct Tree *) arrayDecl: (char **) p1 args: (char **) lp end: (char **) rp
 {
 	struct Tree *t;
-	int size;
+	int size, elsz;
 
-	if([self wordIs: p1[2] name: "address"]) {
-		[self error: "ADDRESS arrays need 16-bit values" code: 255];
-		return(0);
-	}
-	if(![self wordIs: p1[2] name: "byte"]) {
+	if(![self wordIs: p1[2] name: "byte"] &&
+	    ![self wordIs: p1[2] name: "address"]) {
 		[self error: ERR_SYNTAX code: 255];
 		return(0);
 	}
@@ -1687,10 +1985,125 @@ static struct Keyword keyw[] = {
 		[self error: ERR_SYNTAX code: 255];
 		return(0);
 	}
+	elsz = [self wordIs: p1[2] name: "address"] ? 2 : 1;
+	if(size > 255 || size * elsz > RAMSIZE) {
+		[self error: ERR_LARGE code: 255];
+		return(0);
+	}
 	t = [self tree];
 	t->DTYP = TARRAY;
 	t->DARR[0] = p1[1];
 	t->DARR[1] = *lp;
+	if(elsz == 2)
+		t->DARR[2] = "address";
+	return(t);
+}
+
+/*
+ * stringBytes
+ *	emit a quoted word (QUOTE-flagged characters from
+ *	the lexer) as a list of byte values
+ */
+- (void) stringBytes: (char *) s
+{
+	unsigned char c;
+	int first;
+
+	first = 1;
+	while((c = (unsigned char) *s++) != 0) {
+		c &= 0177;
+		if(!first)
+			printf(",");
+		printf("%d", c);
+		first = 0;
+	}
+}
+
+/*
+ * collectValues
+ *	depth-zero comma split between lp and rp; each
+ *	one-word constant lands in out[]; strings arrive
+ *	QUOTE-flagged; returns the count
+ */
+- (int) collectValues: (char **) lp end: (char **) rp into: (char **) dst
+{
+	char **q, **c;
+	int n;
+
+	n = 0;
+	for(c = lp; ; ) {
+		q = [self findComma: c end: rp];
+		if(q == 0)
+			q = rp;
+		if(q == c) {
+			[self error: ERR_SYNTAX code: 255];
+			return(-1);
+		}
+		if(q - c != 1) {
+			[self error: ERR_SYNTAX code: 255];
+			return(-1);
+		}
+		if(n == ARGSIZ) {
+			[self error: ERR_LARGE code: 255];
+			return(-1);
+		}
+		dst[n++] = *c;
+		if(q == rp)
+			return(n);
+		c = q+1;
+	}
+}
+
+/*
+ * dataDecl
+ *	DECLARE name [BYTE] DATA (const, ...) as a TDATA
+ *	node; every data constant goes in DARR[1..]
+ */
+- (struct Tree *) dataDecl: (char **) p1 args: (char **) lp end: (char **) rp
+{
+	struct Tree *t;
+	int n;
+
+	t = [self tree];
+	t->DTYP = TDATA;
+	t->DARR[0] = p1[1];
+	n = [self collectValues: lp end: rp into: t->DARR + 1];
+	if(n < 0)
+		return(0);
+	return(t);
+}
+
+/*
+ * initialDecl
+ *	DECLARE name [(n)] type INITIAL (const, ...) as
+ *	TINITIAL; DARR holds name, size word, type word,
+ *	item-count word, then each preset constant
+ */
+- (struct Tree *) initialDecl: (char **) p1 count: (int) n args: (char **) lp end: (char **) rp args2: (char **) lp2 end: (char **) rp2
+{
+	struct Tree *t;
+	int i, m;
+
+	t = [self tree];
+	t->DTYP = TINITIAL;
+	t->DARR[0] = p1[1];
+	i = 1;
+	if(lp == 0)
+		t->DARR[i++] = 0;
+	else
+		t->DARR[i++] = *lp;
+	if([self wordIs: p1[n-2] name: "byte"])
+		t->DARR[i++] = 0;
+	else if([self wordIs: p1[n-2] name: "address"])
+		t->DARR[i++] = "address";
+	else {
+		[self error: ERR_SYNTAX code: 255];
+		return(0);
+	}
+	m = [self collectValues: lp2 end: rp2 into: t->DARR + 4];
+	if(m < 0)
+		return(0);
+	t->DARR[i] = strdup([self integerToASCII: m]);
 	return(t);
 }
 
@@ -1740,29 +2153,37 @@ static struct Keyword keyw[] = {
 - (struct Tree *) syn7: (char **) p1 end: (char **) p2
 {
 	register char **p;
-	char **lp, **rp;
+	char **lp, **rp, **lp2, **rp2;
 	register struct Tree *t;
 	char *w[ARGSIZ];
 	int n, l, k;
 
 	lp = 0;
 	rp = 0;
+	lp2 = 0;
+	rp2 = 0;
 	n = 0;
 	l = 0;
 	for(p=p1; p!=p2; p++)
 	switch(**p) {
 
 	case '(':
-		if(l == 0 && lp != 0)
-			[self error: ERR_SYNTAX code: 255];
-		if(l == 0)
-			lp = p+1;
+		if(l == 0) {
+			if(lp == 0)
+				lp = p+1;
+			else if(lp2 == 0)
+				lp2 = p+1;
+			else
+				[self error: ERR_SYNTAX code: 255];
+		}
 		l++;
 		continue;
 
 	case ')':
 		l--;
-		if(l == 0)
+		if(l == 0 && rp != 0)
+			rp2 = p;
+		if(l == 0 && rp == 0)
 			rp = p;
 		continue;
 
@@ -1791,6 +2212,17 @@ static struct Keyword keyw[] = {
 			return [self arrayDecl: w args: lp end: rp];
 		if(n == 2 && [self srchx: w[0]] == TDECL)
 			return [self groupDecl: w args: lp end: rp];
+		if(n >= 3 && [self srchx: w[0]] == TDECL &&
+		    [self wordIs: w[n-1] name: "data"])
+			return [self dataDecl: w args: lp end: rp];
+		if(n >= 3 && [self srchx: w[0]] == TDECL &&
+		    [self wordIs: w[n-1] name: "initial"]) {
+			if(lp2 != 0)
+				return [self initialDecl: w count: n
+				    args: lp end: rp args2: lp2 end: rp2];
+			return [self initialDecl: w count: n
+			    args: 0 end: 0 args2: lp end: rp];
+		}
 		if(n != 0)
 			[self error: ERR_SYNTAX code: 255];
 		t = [self tree];
@@ -1805,7 +2237,54 @@ static struct Keyword keyw[] = {
 	switch(k = [self srchx: w[0]]) {
 
 	case TDECL:
-		/* DECLARE name BYTE, DECLARE name ADDRESS */
+		/* DECLARE name BYTE, DECLARE name ADDRESS, and
+		   the comma-split DECLARE a type, b type, ... */
+		if(n > 3) {
+			struct Tree *seg[ARGSIZ], *dl;
+			int i, nc, isbyte;
+
+			nc = 0;
+			for(i = 1; i < n; ) {
+				if(i + 1 >= n || ![self nameOk: w[i]] ||
+				    [self srchx: w[i]] != -1 ||
+				    strcmp(w[i], ",") == 0) {
+					[self error: ERR_SYNTAX code: 255];
+					return(0);
+				}
+				isbyte = [self wordIs: w[i+1] name: "byte"];
+				if(!isbyte &&
+				    ![self wordIs: w[i+1] name: "address"]) {
+					[self error: ERR_SYNTAX code: 255];
+					return(0);
+				}
+				if(nc == ARGSIZ) {
+					[self error: ERR_LARGE code: 255];
+					return(0);
+				}
+				dl = [self tree];
+				dl->DTYP = isbyte ? TDECL : TADDR;
+				dl->DARR[0] = w[i];
+				seg[nc++] = dl;
+				i += 2;
+				if(i == n)
+					break;
+				if(strcmp(w[i], ",") != 0) {
+					[self error: ERR_SYNTAX code: 255];
+					return(0);
+				}
+				i++;
+			}
+			dl = 0;
+			while(nc > 0) {
+				nc--;
+				t = [self tree];
+				t->DTYP = TLST;
+				t->DLEF = seg[nc];
+				t->DRIT = dl;
+				dl = t;
+			}
+			return(dl);
+		}
 		if(n != 3) {
 			[self error: ERR_SYNTAX code: 255];
 			return(0);
