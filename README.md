@@ -208,8 +208,9 @@ body in header order, exactly as in PL/M-80. The result is
 procedure is invoked with `CALL` and a typed one in an
 expression, again after PL/M-80. `RETURN;` and
 `RETURN expression;` both work. The `name:` and `PROCEDURE`
-may be split by a line break, and statements may follow
-`END name;` inside the same block, as PL/M-80 allows.
+may be split by a line break, the name after `END` may be
+omitted (`END;`), and statements may follow the procedure's
+`END` inside the same block, as PL/M-80 allows.
 
 Calls follow the PL/M-80 convention: a single argument
 arrives in `C`; with two or more, the last is in `E` and the
@@ -237,7 +238,7 @@ Planned: `ADDRESS` parameters.
 | `SHL(v, n)`, `SHR(v, n)` | Supported: shift by count, 0 keeps value |
 | `ROL(v, n)`, `ROR(v, n)` | Supported: rotate by count |
 | `SCL(v, n)`, `SCR(v, n)` | Supported: rotate through clear carry |
-| `TIME(n)` | Supported: about 100us per unit |
+| `CALL TIME(n)` | Supported: about 100us per unit; `TIME` is an untyped procedure, so it is valid only after `CALL` |
 | `DEC(a + b)`, `DEC(a PLUS b)` | Supported: `daa` after the addition |
 | `LENGTH(A)`, `LAST(A)` | Supported: folded element count, highest subscript |
 
@@ -259,7 +260,7 @@ never freed) and run the suite:
 
 The suite rebuilds the compiler and checks exit codes,
 diagnostics, emitted assembly and final image bytes for
-198 programs, including one rejection test per non-PL/M
+203 programs, including one rejection test per non-PL/M
 spelling (`int`, `==`, `!=`, `!`, `&&`, `||`, `&`, `|`,
 `^`, `%`, bare `WHILE`, `THEN`-less `IF`, `{`/`}`,
 `//` comments).
