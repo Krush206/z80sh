@@ -69,6 +69,36 @@ static int nameEqual(const char *a, const char *b)
 	}
 }
 
+/*
+ * leadingDecls
+ *	fill dst with the leading DECLARE leaves of a
+ *	procedure body in source order, at most max; the
+ *	parameter declarations open the body, so the walk
+ *	stops at the first statement that is not a DECLARE
+ */
+static int leadingDecls(struct Tree *body, struct Tree **dst, int max)
+{
+	struct Tree *w, *s, *leaf;
+	int n;
+
+	n = 0;
+	for(w = body; w != 0 && n < max; w = w->DRIT) {
+		s = w->DTYP == TLST ? w->DLEF : w;
+		while(s != 0 && n < max) {
+			if(s->DTYP == TDECL)
+				leaf = s;
+			else if(s->DTYP == TLST && s->DLEF != 0 &&
+			    s->DLEF->DTYP == TDECL)
+				leaf = s->DLEF;
+			else
+				return(n);
+			dst[n++] = leaf;
+			s = s->DTYP == TDECL ? 0 : s->DRIT;
+		}
+	}
+	return(n);
+}
+
 @implementation Shell (Semantic)
 /*
  * symbolType
@@ -106,6 +136,9 @@ static int nameEqual(const char *a, const char *b)
 			return(0);
 		return [self symbolType: i];
 	case TSUBSCRIPT:
+		i = [self procIndex: t->DARR[0]];
+		if(i >= 0)
+			return prcret[i] == 2;
 		i = [self lookupName: t->DARR[0]];
 		if(i < 0)
 			return(0);
@@ -982,9 +1015,18 @@ static int nameEqual(const char *a, const char *b)
             printf("\n");
             break;
 
-        case TCALL:
+        case TCALL: {
+            int pi;
+
+            pi = [self procIndex: t->DARR[0]];
+            /* CALL only invokes a void procedure, after PL/M-80 */
+            if(pi >= 0 && prcret[pi] != 0) {
+                [self printString: t->DARR[0]];
+                [self error: ERR_SYNTAX code: 255];
+            }
             [self emitCall: t];
             break;
+        }
 
         case TRETURN: {
             int pi;
@@ -1019,6 +1061,15 @@ static int nameEqual(const char *a, const char *b)
         case TSUBSCRIPT: {
             int i;
 
+            i = [self procIndex: t->DARR[0]];
+            if(i >= 0) {
+                if(prcret[i] == 0) {
+                    [self printString: t->DARR[0]];
+                    [self error: ERR_SYNTAX code: 255];
+                }
+                [self emitCall: t];
+                break;
+            }
             i = [self lookupName: t->DARR[0]];
             if(i < 0) {
                 [self printString: t->DARR[0]];
@@ -1165,7 +1216,7 @@ static int nameEqual(const char *a, const char *b)
         }
 
         default:
-            fprintf(stderr, "Unknown AST node type: %d\n", t->DTYP);
+            [self error: "unknown syntax tree node" code: 255];
             break;
     }
 }
@@ -1211,7 +1262,10 @@ static int nameEqual(const char *a, const char *b)
     if([self arraySize: i] <= 0) {
         [self error: ERR_SYNTAX code: 255];
     }
-    [self compileTree: t->DLEF];
+    if(t->DLEF == 0 || t->DLEF->DRIT != 0) {
+        [self error: ERR_SYNTAX code: 255];
+    }
+    [self compileTree: t->DLEF->DLEF];
     printf("\tld e, a\n");
     printf("\tld hl, %s\n", symlab[i]);
     printf("\tld d, 0\n");
@@ -1273,22 +1327,21 @@ static int nameEqual(const char *a, const char *b)
 		}
 		av[n++] = p->DLEF;
 	}
+	/* evaluate every argument left to right, keeping the
+	   results on the stack: a later argument that is itself
+	   a call would otherwise clobber C or E */
 	for(i = 0; i < n; i++) {
-		if(i < n - 2) {
-			[self compileTree: av[i]];
-			if([self exprType: av[i]])
-				printf("\tld a, l\n");
-			printf("\tpush af\n");
-		}
-	}
-	for(i = n - 2; i < n; i++) {
-		if(i < 0)
-			continue;
 		[self compileTree: av[i]];
 		if([self exprType: av[i]])
 			printf("\tld a, l\n");
-		printf(i == n - 1 ? "\tld e, a\n" : "\tld c, a\n");
+		printf("\tpush af\n");
 	}
+	/* the last two become E and C; earlier ones stay for the
+	   callee to pop, arg0 deepest */
+	if(n >= 1)
+		printf("\tpop af\n\tld e, a\n");
+	if(n >= 2)
+		printf("\tpop af\n\tld c, a\n");
 }
 
 /*
@@ -1299,13 +1352,21 @@ static int nameEqual(const char *a, const char *b)
  */
 - (void) emitCall: (struct Tree *) t
 {
-	int pi;
+	int pi, n;
+	struct Tree *p;
 	char *s;
 
 	pi = [self procIndex: t->DARR[0]];
 	if(pi < 0) {
 		[self printString: t->DARR[0]];
 		[self error: ERR_UNDECL code: 255];
+	}
+	n = 0;
+	for(p = t->DLEF; p != 0; p = p->DRIT)
+		n++;
+	if(n != prcnpar[pi]) {
+		[self printString: t->DARR[0]];
+		[self error: ERR_SYNTAX code: 255];
 	}
 	[self emitArgs: t->DLEF];
 	s = prcnam[pi];
@@ -1324,8 +1385,8 @@ static int nameEqual(const char *a, const char *b)
  */
 - (void) defineProc: (struct Tree *) t
 {
-	int pi, npar, ret, i, n, lv, ra, skip;
-	struct Tree *w, *leaf;
+	int pi, npar, np, ret, i, n, lv, ra, skip;
+	struct Tree *decls[MAXPARS];
 	char *s, *d;
 
 	if(*prcc == PROCSIZ) {
@@ -1365,32 +1426,25 @@ static int nameEqual(const char *a, const char *b)
 	printf("\tjp L%d\n", skip);
 	printf("Q_%s:\n", prcnam[pi]);
 	/*
-	 * The body's leading DECLAREs allocate the params.
-	 * They must be in header order, and get marked TNOP
-	 * so the body compile below allocates them once.
+	 * The body's leading DECLAREs allocate the params in
+	 * header order; mark them TNOP so the body compile
+	 * below does not allocate them twice.
 	 */
-	i = 0;
-	for(w = t->DLEF; w != 0 && i < npar; ) {
-		if(w->DTYP != TLST || w->DLEF == 0)
-			break;
-		leaf = w->DLEF;
-		if(leaf->DTYP != TDECL)
-			break;
-		if(i == 0)
-			leaf = w->DLEF;
-		if(nameEqual(leaf->DARR[0], t->DARR[3 + i])) {
-			prcadr[pi][i] = [self declareName: leaf->DARR[0]
-			    type: TDECL];
-			leaf->DTYP = TNOP;
-			i++;
-			if(i == npar)
-				break;
-		}
-		w = w->DRIT;
-	}
-	if(i != npar) {
+	np = leadingDecls(t->DLEF, decls, npar);
+	if(np != npar) {
 		[self printString: t->DARR[0]];
 		[self error: ERR_SYNTAX code: 255];
+	}
+	for(i = 0; i < npar; i++) {
+		if(!nameEqual(decls[i]->DARR[0], t->DARR[3 + i])) {
+			[self printString: t->DARR[0]];
+			[self error: ERR_SYNTAX code: 255];
+		}
+		prcadr[pi][i] = [self declareName: decls[i]->DARR[0]
+		    type: TDECL];
+		printf("%s:\tequ 0x%X\n", symlab[prcadr[pi][i]],
+		    symadr[prcadr[pi][i]]);
+		decls[i]->DTYP = TNOP;
 	}
 	/* entry stores: last param in E, prior in C, rest
 	   popped back off the stack */
