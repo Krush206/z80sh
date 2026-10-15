@@ -74,6 +74,8 @@
 #define TINITIAL 63
 #define TLITERAL 64
 #define TINTERRUPT 65
+#define TLDEF 66
+#define TNOP 67
 #define TMUL 20
 #define TDIV 21
 #define TMOD 22
@@ -165,6 +167,11 @@ struct Tree {
 
 @interface Shell (Semantic)
 - (void) compileTree: (struct Tree *) t;
+- (int) exprType: (struct Tree *) t;
+- (int) symbolType: (int) i;
+- (void) toHL;
+- (void) compile16: (struct Tree *) t;
+- (void) pair16: (struct Tree *) t;
 - (void) compileShift: (struct Tree *) t op: (const char *) op;
 - (void) prologue;
 - (void) compileAddress: (struct Tree *) t;
@@ -173,6 +180,11 @@ struct Tree {
 - (int) lookupName: (char *) na;
 - (int) arraySize: (int) i;
 - (void) compileIndex: (struct Tree *) t;
+- (void) emitLabel: (char *) na;
+- (void) emitArgs: (struct Tree *) list;
+- (void) emitCall: (struct Tree *) t;
+- (void) defineProc: (struct Tree *) t;
+- (int) procIndex: (char *) na;
 @end
 
 @interface Shell (Lexer)
@@ -215,6 +227,10 @@ struct Tree {
 - (char **) skipSep: (char **) p1 end: (char **) p2;
 - (int) splitCase: (char **) p1 end: (char **) p2 into: (struct Tree **) stmts;
 - (struct Tree *) call: (int) k args: (char **) lp end: (char **) rp;
+- (void) stringBytes: (char *) s;
+- (int) collectValues: (char **) lp end: (char **) rp into: (char **) dst;
+- (struct Tree *) dataDecl: (char **) p1 args: (char **) lp end: (char **) rp;
+- (struct Tree *) initialDecl: (char **) p1 count: (int) n args: (char **) lp end: (char **) rp args2: (char **) lp2 end: (char **) rp2;
 - (struct Tree *) call2: (int) k args: (char **) lp end: (char **) rp;
 - (struct Tree *) callDec: (char **) lp end: (char **) rp;
 - (char **) findAssign: (char **) p1 end: (char **) p2;
@@ -225,6 +241,10 @@ struct Tree {
 - (struct Tree *) arrayInfo: (int) k args: (char **) lp end: (char **) rp;
 - (void) stripDollar: (char *) s;
 - (struct Tree *) doStatement: (char **) p1 end: (char **) p2;
+- (struct Tree *) procDef: (char **) p1 end: (char **) p2;
+- (struct Tree *) callStmt: (char **) p1 end: (char **) p2;
+- (char **) matchProc: (char **) p1 end: (char **) p2;
+- (int) nameEq: (char *) a other: (char *) b;
 - (struct Tree *) tree;
 @end
 
