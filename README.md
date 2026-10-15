@@ -200,10 +200,6 @@ must be a plain, already declared `ADDRESS` scalar, and the
 group form (`DECLARE (v BASED p, ...) BYTE;`) applies the
 base to each name.
 
-Planned, in this order:
-
-    ADDRESS parameters;
-
 ## Procedures
 
 Supported:
@@ -213,10 +209,10 @@ Supported:
         statement; ...;
     END name;
 
-Parameters are `BYTE`; they are declared at the top of the
-body in header order, exactly as in PL/M-80. The result is
-`BYTE` (left in `A`) or `ADDRESS` (left in `HL`); a void
-procedure is invoked with `CALL` and a typed one in an
+Parameters are `BYTE` or `ADDRESS`; they are declared at the
+top of the body in header order, exactly as in PL/M-80. The
+result is `BYTE` (left in `A`) or `ADDRESS` (left in `HL`); a
+void procedure is invoked with `CALL` and a typed one in an
 expression, again after PL/M-80. `RETURN;` and
 `RETURN expression;` both work. The `name:` and `PROCEDURE`
 may be split by a line break, the name after `END` may be
@@ -224,9 +220,12 @@ omitted (`END;`), and statements may follow the procedure's
 `END` inside the same block, as PL/M-80 allows.
 
 Calls follow the PL/M-80 convention: a single argument
-arrives in `C`; with two or more, the last is in `E` and the
-one before it in `C`; earlier arguments travel on the stack,
-deepest first. Arguments evaluate left to right, and
+arrives in `BC` (a `BYTE` in `C`); with two or more, the last
+is in `DE` (`E` for a `BYTE`) and the one before it in `BC`
+(`C` for a `BYTE`); earlier arguments travel on the stack,
+deepest first. An argument is widened to fill an `ADDRESS`
+parameter and an `ADDRESS` argument keeps only its low byte
+for a `BYTE` parameter. Arguments evaluate left to right, and
 procedures are non-recursive, since parameters live in
 static storage.
 
@@ -234,8 +233,6 @@ An interrupt procedure is `name: PROCEDURE INTERRUPT n;`
 (no parameters, no result type). Its body saves and restores
 `hl`, `de`, `bc` and `af` and re-enables interrupts with
 `ei` before returning. Supported.
-
-Planned: `ADDRESS` parameters.
 
 ## Built-in procedures
 
@@ -271,7 +268,7 @@ never freed) and run the suite:
 
 The suite rebuilds the compiler and checks exit codes,
 diagnostics, emitted assembly and final image bytes for
-227 programs, including one rejection test per non-PL/M
+233 programs, including one rejection test per non-PL/M
 spelling (`int`, `==`, `!=`, `!`, `&&`, `||`, `&`, `|`,
 `^`, `%`, bare `WHILE`, `THEN`-less `IF`, `{`/`}`,
 `//` comments).
