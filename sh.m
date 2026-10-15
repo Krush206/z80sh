@@ -59,16 +59,29 @@ main(int c, char *av[])
 	(void) [sh getScope];
 	(void) [sh getRamPointer];
 	(void) [sh getOrgFlag];
+	(void) [sh getOrgEnable];
+	(void) [sh getCartEnable];
 	(void) [sh getMacroCount];
 	(void) [sh getLabCount];
 	(void) [sh getProcCount];
 	(void) [sh getInProc];
-	v = av;
-	if(c > 1) {
+	for(v = av+1; v < av+c; v++) {
+		if(strcmp(*v, "-o") == 0) {
+			*[sh getOrgEnable] = 1;
+			continue;
+		}
+		if(strcmp(*v, "-h") == 0) {
+			*[sh getCartEnable] = 1;
+			continue;
+		}
+		if(**v == '-') {
+			[sh printString: *v];
+			[sh error: ERR_OPT code: 255];
+		}
 		close(0);
-		f = open(v[1], 0);
+		f = open(*v, 0);
 		if(f < 0) {
-			[sh printString: v[1]];
+			[sh printString: *v];
 			[sh error: ERR_OPEN code: 255];
 		}
 	}
