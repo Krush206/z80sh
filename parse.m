@@ -45,6 +45,7 @@
 static struct Keyword keyw[] = {
 	{ "address", TADDR },
 	{ "and", TAND2 },
+	{ "by", TBY },
 	{ "byte", TBYTE },
 	{ "call", TCALL },
 	{ "case", TCASE },
@@ -681,6 +682,33 @@ static struct Keyword keyw[] = {
 }
 
 /*
+ * findBy
+ *	the BY closing an iterative DO step clause, or 0 when
+ *	the range holds none
+ */
+- (char **) findBy: (char **) p1 end: (char **) p2
+{
+	char **q;
+	int l;
+
+	l = 0;
+	for(q = p1; q != p2; q++) {
+		if(strcmp(*q, "(") == 0) {
+			l++;
+			continue;
+		}
+		if(strcmp(*q, ")") == 0) {
+			l--;
+			continue;
+		}
+		if(l != 0 || ![self wordIs: *q name: "by"])
+			continue;
+		return(q);
+	}
+	return(0);
+}
+
+/*
  * skipSep
  *	first non-separator word in the range, or the end
  */
@@ -979,10 +1007,10 @@ static struct Keyword keyw[] = {
 - (struct Tree *) doStatement: (char **) p1 end: (char **) p2
 {
 	char **p;
-	char **m, **q, **semi, **topos;
+	char **m, **q, **semi, **topos, **bypos;
 	char *var;
 	struct Tree *t, *e1, *e2, *body;
-	struct Tree *v1, *v2, *v3, *v4, *n1;
+	struct Tree *v1, *v2, *v3, *v4, *step;
 	struct Tree *init, *cond, *incr, *incv, *loop, *lbody, *root;
 	struct Tree *sel, *tail, *cmp, *num, *br;
 	struct Tree *stmts[ARGSIZ];
@@ -1058,7 +1086,20 @@ static struct Keyword keyw[] = {
 			return(0);
 		}
 		e1 = [self synor: p+2 end: topos];
-		e2 = [self synor: topos+1 end: semi];
+		/* the optional BY clause sets the step; without one
+		   the index advances by 1 each pass */
+		bypos = [self findBy: topos+1 end: semi];
+		step = 0;
+		if(bypos != 0) {
+			e2 = [self synor: topos+1 end: bypos];
+			step = [self synor: bypos+1 end: semi];
+		} else
+			e2 = [self synor: topos+1 end: semi];
+		if(step == 0) {
+			step = [self tree];
+			step->DTYP = TNUM;
+			step->DARR[0] = "1";
+		}
 		q = semi+1;
 		while(q != m && (strcmp(*q, ";") == 0 || strcmp(*q, "\n") == 0))
 			q++;
@@ -1077,9 +1118,6 @@ static struct Keyword keyw[] = {
 		v4 = [self tree];
 		v4->DTYP = TVAR;
 		v4->DARR[0] = var;
-		n1 = [self tree];
-		n1->DTYP = TNUM;
-		n1->DARR[0] = "1";
 		init = [self tree];
 		init->DTYP = TASG;
 		init->DLEF = v1;
@@ -1091,7 +1129,7 @@ static struct Keyword keyw[] = {
 		incv = [self tree];
 		incv->DTYP = TADD;
 		incv->DLEF = v3;
-		incv->DRIT = n1;
+		incv->DRIT = step;
 		incr = [self tree];
 		incr->DTYP = TASG;
 		incr->DLEF = v4;
@@ -1101,7 +1139,7 @@ static struct Keyword keyw[] = {
 		lbody->DLEF = body;
 		lbody->DRIT = incr;
 		loop = [self tree];
-		loop->DTYP = TWHILE;
+		loop->DTYP = TDOFOR;
 		loop->DLEF = cond;
 		loop->DRIT = lbody;
 		root = [self tree];
@@ -2581,6 +2619,7 @@ static struct Keyword keyw[] = {
 	case TTHEN:
 	case TTO:
 	case TNOT:
+	case TBY:
 	case TBYTE:
 	case TAND2:
 	case TOR2:
