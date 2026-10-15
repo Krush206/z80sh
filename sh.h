@@ -243,6 +243,10 @@ struct Tree {
 - (struct Tree *) doStatement: (char **) p1 end: (char **) p2;
 - (struct Tree *) procDef: (char **) p1 end: (char **) p2;
 - (struct Tree *) callStmt: (char **) p1 end: (char **) p2;
+- (struct Tree *) argList: (char **) lp end: (char **) rp;
+- (struct Tree *) literalDecl: (char *) na value: (char *) val;
+- (char *) macroValue: (char *) na;
+- (char *) resolveMacro: (char *) w;
 - (char **) matchProc: (char **) p1 end: (char **) p2;
 - (int) nameEq: (char *) a other: (char *) b;
 - (struct Tree *) tree;
