@@ -1385,7 +1385,7 @@ static int leadingDecls(struct Tree *body, struct Tree **dst, int max)
  */
 - (void) defineProc: (struct Tree *) t
 {
-	int pi, npar, np, ret, i, n, lv, ra, skip;
+	int pi, npar, np, ret, i, n, lv, ra, skip, ip;
 	struct Tree *decls[MAXPARS];
 	char *s, *d;
 
@@ -1416,6 +1416,9 @@ static int leadingDecls(struct Tree *body, struct Tree **dst, int max)
 	}
 	prcnpar[pi] = npar;
 	prcret[pi] = ret;
+	/* interrupt procedures are void and parameterless and
+	   save every register across the handler */
+	ip = t->DARR[4] != 0;
 	/* params become block-level storage */
 	lv = *scope;
 	n = *symc;
@@ -1425,6 +1428,12 @@ static int leadingDecls(struct Tree *body, struct Tree **dst, int max)
 	skip = (*lblc)++;
 	printf("\tjp L%d\n", skip);
 	printf("Q_%s:\n", prcnam[pi]);
+	if(ip) {
+		printf("\tpush hl\n");
+		printf("\tpush de\n");
+		printf("\tpush bc\n");
+		printf("\tpush af\n");
+	}
 	/*
 	 * The body's leading DECLAREs allocate the params in
 	 * header order; mark them TNOP so the body compile
@@ -1468,6 +1477,13 @@ static int leadingDecls(struct Tree *body, struct Tree **dst, int max)
 		printf("\tpush de\n");
 	}
 	[self compileTree: t->DLEF];
+	if(ip) {
+		printf("\tpop af\n");
+		printf("\tpop bc\n");
+		printf("\tpop de\n");
+		printf("\tpop hl\n");
+		printf("\tei\n");
+	}
 	printf("\tret\n");
 	printf("L%d:\n", skip);
 	*inProc = 0;
