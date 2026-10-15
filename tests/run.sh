@@ -56,12 +56,16 @@ if ! gcc -o "$CSH" "$TMP"/obj/*.o \
 fi
 echo "build clean, no warnings"
 
+# Extra command-line flags for the compiler under test; tests
+# that exercise -o / -h prefix their helper call with FLAGS=...
+FLAGS=
+
 # t_ok <name> : stdin is the source; expects exit 0, empty
 # stderr, and output that z80asm accepts.
 t_ok() {
 	name=$1
 	cat > "$TMP/t.in"
-	if ! timeout 5 "$CSH" < "$TMP/t.in" > "$TMP/t.asm" 2> "$TMP/t.err"; then
+	if ! timeout 5 "$CSH" $FLAGS < "$TMP/t.in" > "$TMP/t.asm" 2> "$TMP/t.err"; then
 		fail "$name" "exit=$? stderr=[$(cat "$TMP/t.err")]"
 		return
 	fi
@@ -82,7 +86,7 @@ t_grep() {
 	name=$1
 	shift
 	cat > "$TMP/t.in"
-	if ! timeout 5 "$CSH" < "$TMP/t.in" > "$TMP/t.asm" 2> "$TMP/t.err"; then
+	if ! timeout 5 "$CSH" $FLAGS < "$TMP/t.in" > "$TMP/t.asm" 2> "$TMP/t.err"; then
 		fail "$name" "exit=$? stderr=[$(cat "$TMP/t.err")]"
 		return
 	fi
@@ -110,7 +114,7 @@ t_nogrep() {
 	name=$1
 	shift
 	cat > "$TMP/t.in"
-	if ! timeout 5 "$CSH" < "$TMP/t.in" > "$TMP/t.asm" 2> "$TMP/t.err"; then
+	if ! timeout 5 "$CSH" $FLAGS < "$TMP/t.in" > "$TMP/t.asm" 2> "$TMP/t.err"; then
 		fail "$name" "exit=$? stderr=[$(cat "$TMP/t.err")]"
 		return
 	fi
@@ -139,7 +143,7 @@ t_order() {
 	first=$2
 	second=$3
 	cat > "$TMP/t.in"
-	if ! timeout 5 "$CSH" < "$TMP/t.in" > "$TMP/t.asm" 2> "$TMP/t.err"; then
+	if ! timeout 5 "$CSH" $FLAGS < "$TMP/t.in" > "$TMP/t.asm" 2> "$TMP/t.err"; then
 		fail "$name" "exit=$? stderr=[$(cat "$TMP/t.err")]"
 		return
 	fi
@@ -171,7 +175,7 @@ t_err() {
 	want_exit=$2
 	want_err=$3
 	cat > "$TMP/t.in"
-	timeout 5 "$CSH" < "$TMP/t.in" > "$TMP/t.asm" 2> "$TMP/t.err"
+	timeout 5 "$CSH" $FLAGS < "$TMP/t.in" > "$TMP/t.asm" 2> "$TMP/t.err"
 	got_exit=$?
 	if [ "$got_exit" != "$want_exit" ]; then
 		fail "$name" "exit=$got_exit, want $want_exit"
@@ -185,11 +189,12 @@ t_err() {
 }
 
 # t_rom <name> : stdin is the source; expects a full 32768-byte
-# image with the TMR SEGA header at 0x7FF0.
+# image with the TMR SEGA header at 0x7FF0.  The -o and -h
+# flags supply the org-0 startup and the cartridge header.
 t_rom() {
 	name=$1
 	cat > "$TMP/t.in"
-	if ! timeout 5 "$CSH" < "$TMP/t.in" > "$TMP/t.asm" 2> "$TMP/t.err"; then
+	if ! timeout 5 "$CSH" -o -h < "$TMP/t.in" > "$TMP/t.asm" 2> "$TMP/t.err"; then
 		fail "$name" "exit=$? stderr=[$(cat "$TMP/t.err")]"
 		return
 	fi
@@ -1492,6 +1497,52 @@ EOF
 # A final line with no trailing newline must still compile.
 printf 'DECLARE X BYTE\nX = 1' > "$TMP/noeol.in"
 t_ok no-final-newline < "$TMP/noeol.in"
+
+# --- command-line flags: -o startup, -h cartridge header -----
+
+# by default the compiler emits plain code: no org-0 startup
+# and no cartridge header
+t_grep default-plain-program "halt\$" <<'EOF'
+DECLARE X BYTE
+X = 1
+EOF
+
+t_nogrep default-no-startup "jp start" "seek 0x7ff0" "TMR SEGA" <<'EOF'
+DECLARE X BYTE
+X = 1
+EOF
+
+# -o adds the org-0 vectors and boot code, but not the header
+FLAGS=-o t_grep opt-org "org 0" "jp start" "ld sp, 0xDFF8" <<'EOF'
+DECLARE X BYTE
+X = 1
+EOF
+
+FLAGS=-o t_nogrep opt-org-no-header "TMR SEGA" <<'EOF'
+DECLARE X BYTE
+X = 1
+EOF
+
+# -h adds the cartridge header, but not the startup
+FLAGS=-h t_grep opt-header "seek 0x7ff0" "TMR SEGA" <<'EOF'
+DECLARE X BYTE
+X = 1
+EOF
+
+FLAGS=-h t_nogrep opt-header-no-startup "jp start" <<'EOF'
+DECLARE X BYTE
+X = 1
+EOF
+
+FLAGS="-o -h" t_grep opt-both "jp start" "seek 0x7ff0" <<'EOF'
+DECLARE X BYTE
+X = 1
+EOF
+
+FLAGS=-z t_err opt-unknown 255 "unknown option" <<'EOF'
+DECLARE X BYTE
+X = 1
+EOF
 
 echo "----------------------------------------"
 echo "$PASS passed, $FAIL failed"
