@@ -1228,6 +1228,81 @@ RETURN;
 END DOUBLE;
 EOF
 
+# --- interrupt procedures -----------------------------------
+
+t_grep intr-saves-registers "Q_tick:" "push hl" "push de" \
+	"push bc" "push af" "pop af" "pop bc" "pop de" "pop hl" \
+	"ei" <<'EOF'
+TICK: PROCEDURE INTERRUPT 1;
+DECLARE I BYTE;
+I = 1;
+END TICK;
+EOF
+
+t_ok intr-in-module <<'EOF'
+M: DO;
+TICK: PROCEDURE INTERRUPT 3;
+DECLARE I BYTE;
+I = 1;
+END TICK;
+END M;
+EOF
+
+t_err intr-with-params 255 "syntax error" <<'EOF'
+T: PROCEDURE (A) INTERRUPT 1;
+DECLARE A BYTE;
+END T;
+EOF
+
+t_err intr-with-type 255 "syntax error" <<'EOF'
+T: PROCEDURE BYTE INTERRUPT 1;
+END T;
+EOF
+
+# --- labels -------------------------------------------------
+
+t_grep label-declared "L_x:" "jp L_x" <<'EOF'
+DECLARE X LABEL;
+GOTO X;
+X: HALT;
+EOF
+
+# --- module wrapper -----------------------------------------
+
+t_ok module-decl <<'EOF'
+M: DO;
+DECLARE X BYTE;
+X = 1;
+END M;
+EOF
+
+t_ok module-end-no-name <<'EOF'
+M: DO;
+DECLARE X BYTE;
+END;
+EOF
+
+t_ok module-empty <<'EOF'
+M: DO;
+END M;
+EOF
+
+t_ok empty-block <<'EOF'
+DO;
+END;
+EOF
+
+t_ok module-with-procedure <<'EOF'
+M: DO;
+F: PROCEDURE (A) BYTE;
+DECLARE A BYTE;
+RETURN A + 1;
+END F;
+DECLARE X BYTE;
+X = F(3);
+END M;
+EOF
+
 # --- LITERALLY macros ---------------------------------------
 
 t_grep literal-number "ld a, 100" <<'EOF'
