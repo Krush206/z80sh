@@ -1112,6 +1112,186 @@ ENABLE;
 HALT;
 EOF
 
+# --- procedures, parameters and calls -----------------------
+
+t_ok proc-void-call <<'EOF'
+STORE: PROCEDURE;
+RETURN;
+END STORE;
+CALL STORE;
+EOF
+
+t_grep proc-entry-and-call "Q_addu:" "ld \(hl\), e" "ld \(hl\), c" \
+	"call Q_addu" <<'EOF'
+ADDU: PROCEDURE(A, B) BYTE;
+DECLARE A BYTE, B BYTE;
+RETURN A - B;
+END ADDU;
+DECLARE X BYTE;
+X = ADDU(10, 3);
+EOF
+
+t_grep proc-three-params "Q_sub3:" "pop af" "ld c, a" "ld e, a" <<'EOF'
+SUB3: PROCEDURE(P, Q, R) BYTE;
+DECLARE P BYTE, Q BYTE, R BYTE;
+RETURN P - Q - R;
+END SUB3;
+DECLARE X BYTE;
+X = SUB3(1, 2, 3);
+EOF
+
+t_order proc-args-left-to-right "ld a, 1" "ld a, 2" <<'EOF'
+SUB3: PROCEDURE(P, Q, R) BYTE;
+DECLARE P BYTE, Q BYTE, R BYTE;
+RETURN P;
+END SUB3;
+DECLARE X BYTE;
+X = SUB3(1, 2, 3);
+EOF
+
+t_ok proc-address-return <<'EOF'
+ADDR: PROCEDURE(A) ADDRESS;
+DECLARE A BYTE;
+RETURN A;
+END ADDR;
+DECLARE X ADDRESS;
+X = ADDR(5);
+EOF
+
+t_ok proc-nested-calls <<'EOF'
+F: PROCEDURE(A) BYTE;
+DECLARE A BYTE;
+RETURN A + 1;
+END F;
+G: PROCEDURE(A) BYTE;
+DECLARE A BYTE;
+RETURN A + 2;
+END G;
+H: PROCEDURE(A, B) BYTE;
+DECLARE A BYTE, B BYTE;
+RETURN A + B;
+END H;
+DECLARE X BYTE;
+X = H(F(1), G(2));
+EOF
+
+t_err proc-arity-low 255 "syntax error" <<'EOF'
+ADDU: PROCEDURE(A, B) BYTE;
+DECLARE A BYTE, B BYTE;
+RETURN A;
+END ADDU;
+DECLARE X BYTE;
+X = ADDU(1);
+EOF
+
+t_err proc-arity-high 255 "syntax error" <<'EOF'
+ADDU: PROCEDURE(A) BYTE;
+DECLARE A BYTE;
+RETURN A;
+END ADDU;
+DECLARE X BYTE;
+X = ADDU(1, 2);
+EOF
+
+t_err proc-void-in-expr 255 "syntax error" <<'EOF'
+V: PROCEDURE;
+RETURN;
+END V;
+DECLARE X BYTE;
+X = V();
+EOF
+
+t_err proc-call-typed 255 "syntax error" <<'EOF'
+ADDU: PROCEDURE(A) BYTE;
+DECLARE A BYTE;
+RETURN A;
+END ADDU;
+CALL ADDU(1);
+EOF
+
+t_err proc-param-undeclared 255 "syntax error" <<'EOF'
+ADDU: PROCEDURE(A) BYTE;
+RETURN A;
+END ADDU;
+EOF
+
+t_err proc-param-order 255 "syntax error" <<'EOF'
+ADDU: PROCEDURE(A, B) BYTE;
+DECLARE B BYTE, A BYTE;
+RETURN A;
+END ADDU;
+EOF
+
+t_err proc-reserved-name 255 "syntax error" <<'EOF'
+DOUBLE: PROCEDURE;
+RETURN;
+END DOUBLE;
+EOF
+
+# --- LITERALLY macros ---------------------------------------
+
+t_grep literal-number "ld a, 100" <<'EOF'
+DECLARE MAX LITERALLY '100';
+DECLARE X BYTE;
+X = MAX;
+EOF
+
+t_ok literal-expr <<'EOF'
+DECLARE TWO LITERALLY '2';
+DECLARE X BYTE;
+X = TWO + 3;
+EOF
+
+t_ok literal-chain <<'EOF'
+DECLARE A1 LITERALLY '5';
+DECLARE B1 LITERALLY 'A1';
+DECLARE X BYTE;
+X = B1;
+EOF
+
+t_ok literal-array-size <<'EOF'
+DECLARE MAX LITERALLY '4';
+DECLARE A(MAX) BYTE;
+A(0) = 1;
+EOF
+
+t_ok literal-data-value <<'EOF'
+DECLARE N LITERALLY '7';
+DECLARE D DATA (N, 2);
+EOF
+
+# --- DATA and INITIAL declarations --------------------------
+
+t_ok data-decl <<'EOF'
+DECLARE D DATA (1, 2, 3);
+EOF
+
+t_ok data-typed <<'EOF'
+DECLARE D BYTE DATA (1, 2, 3);
+EOF
+
+t_ok data-sized <<'EOF'
+DECLARE D (3) DATA (1, 2, 3);
+EOF
+
+t_ok initial-decl <<'EOF'
+DECLARE D INITIAL (1, 2, 3);
+EOF
+
+t_ok initial-typed <<'EOF'
+DECLARE D BYTE INITIAL (1, 2, 3);
+EOF
+
+t_ok initial-sized <<'EOF'
+DECLARE D (3) INITIAL (1, 2, 3);
+EOF
+
+# --- source form --------------------------------------------
+
+# A final line with no trailing newline must still compile.
+printf 'DECLARE X BYTE\nX = 1' > "$TMP/noeol.in"
+t_ok no-final-newline < "$TMP/noeol.in"
+
 echo "----------------------------------------"
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" = "0" ]
