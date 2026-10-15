@@ -1352,6 +1352,61 @@ X = F(3);
 END M;
 EOF
 
+# a label may sit on its own line, with its statement on the
+# next one; the reference compiler accepts this form
+t_grep label-on-own-line "L_x:" "jp L_x" "halt\$" <<'EOF'
+DECLARE X LABEL;
+GOTO X;
+X:
+HALT;
+EOF
+
+t_grep module-label-newline "L_m:" <<'EOF'
+M:
+DO;
+DECLARE X BYTE;
+X = 1;
+END M;
+EOF
+
+# a newline between the procedure name and PROCEDURE is
+# noise, as PL/M ignores line breaks inside a header
+t_grep proc-header-newline "Q_f:" "call Q_f" <<'EOF'
+M: DO;
+F:
+PROCEDURE (A) BYTE;
+DECLARE A BYTE;
+RETURN A + 1;
+END F;
+DECLARE F2 BYTE;
+F2 = F(3);
+END M;
+EOF
+
+# the reference compiler's own test program: module label
+# and DO on separate lines, END without a name
+t_ok module-own-line-test <<'EOF'
+test:
+do;
+declare i byte;
+declare j byte;
+myfunc: procedure;
+    return;
+end myfunc;
+end;
+EOF
+
+t_ok module-own-line-test2 <<'EOF'
+TEST:
+DO;
+DECLARE I BYTE;
+DECLARE J BYTE;
+MYFUNC: PROCEDURE;
+    RETURN;
+END MYFUNC;
+END;
+EOF
+
 # --- LITERALLY macros ---------------------------------------
 
 t_grep literal-number "ld a, 100" <<'EOF'
