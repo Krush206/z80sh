@@ -138,9 +138,9 @@ branch, so prefer a variable there.
 - `DO; ... END;` grouping: supported.
 - `DO WHILE expression; ... END;`: supported; the loop
   runs while the value is non-zero.
-- `DO variable = e1 TO e2; ... END;`: supported for an
-  already-declared byte variable, stepping by 1 while
-  the variable is `<= e2`.
+- `DO variable = e1 TO e2 [BY e3]; ... END;`: supported for
+  an already-declared `BYTE` or `ADDRESS` variable, stepping
+  by `e3` (default 1) while the variable is `<= e2`.
 - `DO CASE expression; ... END;`: supported; runs the
   statement numbered from 0 by the selector value, and
   nothing when it is out of range.
@@ -260,7 +260,7 @@ never freed) and run the suite:
 
 The suite rebuilds the compiler and checks exit codes,
 diagnostics, emitted assembly and final image bytes for
-203 programs, including one rejection test per non-PL/M
+207 programs, including one rejection test per non-PL/M
 spelling (`int`, `==`, `!=`, `!`, `&&`, `||`, `&`, `|`,
 `^`, `%`, bare `WHILE`, `THEN`-less `IF`, `{`/`}`,
 `//` comments).
