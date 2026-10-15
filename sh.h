@@ -218,6 +218,7 @@ struct Tree {
 - (int) nameOk: (char *) na;
 - (int) doDepth: (char **) p1 end: (char **) p2;
 - (char **) matchEnd: (char **) p1 end: (char **) p2;
+- (char **) endPast: (char **) m end: (char **) p2;
 - (char **) matchParen: (char **) p1 end: (char **) p2;
 - (char **) matchElse: (char **) p1 end: (char **) p2;
 - (char **) findSemi: (char **) p1 end: (char **) p2;
