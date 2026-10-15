@@ -95,7 +95,7 @@ static struct Keyword keyw[] = {
 /*
  * syntax
  *	empty
- *	syn1
+ *	synstmt
  */
 - (struct Tree *) syntax: (char **) p1 end: (char **) p2
 {
@@ -103,7 +103,7 @@ static struct Keyword keyw[] = {
 		if([self anyCharacter: **p1 in: ";\n"])
 			p1++;
 		else
-			return [self syn1: p1 end: p2];
+			return [self synstmt: p1 end: p2];
 	}
 	return(0);
 }
@@ -133,7 +133,7 @@ static struct Keyword keyw[] = {
 		lab = [self tree];
 		lab->DTYP = TLDEF;
 		lab->DARR[0] = *p1;
-		body = [self syn1: p1+2 end: p2];
+		body = [self synstmt: p1+2 end: p2];
 		both = [self tree];
 		both->DTYP = TLST;
 		both->DLEF = lab;
@@ -148,7 +148,7 @@ static struct Keyword keyw[] = {
 
 		/* statement() parses a lone statement range; with
 		   more statements following, step back and let
-		   syn1 split the list first */
+		   synstmt split the list first */
 		for(sp = p1; sp != p2; sp++)
 			if(**sp == ';' || **sp == '\n')
 				return(0);
@@ -170,9 +170,9 @@ static struct Keyword keyw[] = {
 }
 
 /*
- * syn1
- *	syn2
- *	syn2 ; syntax
+ * synstmt
+ *	synasg
+ *	synasg ; syntax
  *
  *	; and newline split at depth zero, where depth counts
  *	parens and DO..END pairs alike, so no DO group ever
@@ -180,8 +180,8 @@ static struct Keyword keyw[] = {
  */
 /*
  * splitList
- *	the TLST node for a syn1 split at p: the head runs
- *	through headparse, falling back to syn2, and the
+ *	the TLST node for a synstmt split at p: the head runs
+ *	through headparse, falling back to synasg, and the
  *	rest through syntax
  */
 - (struct Tree *) splitList: (char **) p1 at: (char **) p end: (char **) p2
@@ -192,7 +192,7 @@ static struct Keyword keyw[] = {
 	t->DTYP = TLST;
 	t->DLEF = [self headparse: p1 end: p];
 	if(t->DLEF == 0)
-		t->DLEF = [self syn2: p1 end: p];
+		t->DLEF = [self synasg: p1 end: p];
 	t1 = [self syntax: p+1 end: p2];
 	if(t1 != 0)
 		t->DRIT = t1;
@@ -202,15 +202,15 @@ static struct Keyword keyw[] = {
 }
 
 /*
- * syn1
- *	syn2
- *	syn2 ; syntax
+ * synstmt
+ *	synasg
+ *	synasg ; syntax
  *
  *	; and newline split at depth zero, where depth counts
  *	parens and DO..END pairs alike, so no DO group ever
  *	splits in the middle
  */
-- (struct Tree *) syn1: (char **) p1 end: (char **) p2
+- (struct Tree *) synstmt: (char **) p1 end: (char **) p2
 {
 	register char **p;
 	register struct Tree *t;
@@ -246,7 +246,7 @@ static struct Keyword keyw[] = {
 		}
 	}
 	if(l == 0 && dd == 0)
-		return [self syn2: p1 end: p2];
+		return [self synasg: p1 end: p2];
 	[self error: ERR_SYNTAX code: 255];
 	return(0);
 }
@@ -329,15 +329,15 @@ static struct Keyword keyw[] = {
 
 /*
  * statement
- *	if ( syn3 ) THEN syn1
- *	if ( syn3 ) THEN syn1 else syn1
- *	if syn3 THEN syn1 [ELSE syn1]
+ *	if ( synor ) THEN synstmt
+ *	if ( synor ) THEN synstmt else synstmt
+ *	if synor THEN synstmt [ELSE synstmt]
  *	doStatement, below
  *
- * bodies are single line ranges; syn1 parses them so they
+ * bodies are single line ranges; synstmt parses them so they
  * nest, chain with ; and form DO..END groups; an else past
  * any nested ifs belongs to this if, after the C shell's
- * syn3; conditions run through syn3 rather than syn2 so
+ * synor; conditions run through synor rather than synasg so
  * that a PL/M = inside one compares instead of assigning
  */
 - (struct Tree *) procDef: (char **) p1 end: (char **) p2
@@ -430,21 +430,21 @@ static struct Keyword keyw[] = {
 		[self error: ERR_SYNTAX code: 255];
 		return(0);
 	}
-	t->DLEF = [self syn1: bs end: m];
+	t->DLEF = [self synstmt: bs end: m];
 	return(t);
 }
 
 /*
  * statement
- *	if ( syn3 ) THEN syn1
- *	if ( syn3 ) THEN syn1 else syn1
- *	if syn3 THEN syn1 [ELSE syn1]
+ *	if ( synor ) THEN synstmt
+ *	if ( synor ) THEN synstmt else synstmt
+ *	if synor THEN synstmt [ELSE synstmt]
  *	doStatement, below
  *
- * bodies are single line ranges; syn1 parses them so they
+ * bodies are single line ranges; synstmt parses them so they
  * nest, chain with ; and form DO..END groups; an else past
  * any nested ifs belongs to this if, after the C shell's
- * syn3; conditions run through syn3 rather than syn2 so
+ * synor; conditions run through synor rather than synasg so
  * that a PL/M = inside one compares instead of assigning
  */
 - (struct Tree *) statement: (char **) p1 end: (char **) p2
@@ -474,7 +474,7 @@ static struct Keyword keyw[] = {
 		t = [self tree];
 		t->DTYP = TRETURN;
 		if(p2 > p1+1)
-			t->DLEF = [self syn2: p1+1 end: p2];
+			t->DLEF = [self synasg: p1+1 end: p2];
 		else
 			t->DLEF = 0;
 		return(t);
@@ -511,7 +511,7 @@ static struct Keyword keyw[] = {
 			return(0);
 		}
 		t->DTYP = TIF;
-		t->DLEF = [self syn3: p1+2 end: rp];
+		t->DLEF = [self synor: p1+2 end: rp];
 		t->DSTR = 0;
 		p = rp+1;
 		if(p == p2 || ![self wordIs: *p name: "then"]) {
@@ -522,11 +522,11 @@ static struct Keyword keyw[] = {
 		bs = p;
 		ep = [self matchElse: p end: p2];
 		if(ep != 0) {
-			t->DRIT = [self syn1: bs end: ep];
-			t->DSTR = [self syn1: ep+1 end: p2];
+			t->DRIT = [self synstmt: bs end: ep];
+			t->DSTR = [self synstmt: ep+1 end: p2];
 		}
 		else
-			t->DRIT = [self syn1: bs end: p2];
+			t->DRIT = [self synstmt: bs end: p2];
 		return(t);
 	}
 	if(k != TIF) {
@@ -566,17 +566,17 @@ static struct Keyword keyw[] = {
 	}
 	t = [self tree];
 	t->DTYP = TIF;
-	t->DLEF = [self syn3: p1+1 end: tp];
+	t->DLEF = [self synor: p1+1 end: tp];
 	t->DSTR = 0;
 	bs = tp+1;
 	p = bs;
 	ep = [self matchElse: p end: p2];
 	if(ep != 0) {
-		t->DRIT = [self syn1: bs end: ep];
-		t->DSTR = [self syn1: ep+1 end: p2];
+		t->DRIT = [self synstmt: bs end: ep];
+		t->DSTR = [self synstmt: ep+1 end: p2];
 	}
 	else
-		t->DRIT = [self syn1: bs end: p2];
+		t->DRIT = [self synstmt: bs end: p2];
 	return(t);
 }
 
@@ -699,7 +699,7 @@ static struct Keyword keyw[] = {
 			[self error: ERR_LARGE code: 255];
 			return(-1);
 		}
-		stmts[k++] = [self syn1: seg end: q];
+		stmts[k++] = [self synstmt: seg end: q];
 		seg = [self skipSep: q+1 end: p2];
 		q = seg;
 	}
@@ -709,7 +709,7 @@ static struct Keyword keyw[] = {
 		[self error: ERR_LARGE code: 255];
 		return(-1);
 	}
-	stmts[k++] = [self syn1: seg end: p2];
+	stmts[k++] = [self synstmt: seg end: p2];
 	return(k);
 }
 
@@ -786,7 +786,7 @@ static struct Keyword keyw[] = {
 /*
  * argList
  *	split the argument range lp..rp into a source-order
- *	TLST chain, one syn2 per argument; a comma inside
+ *	TLST chain, one synasg per argument; a comma inside
  *	nested parens does not separate, and an empty range
  *	has no arguments
  */
@@ -815,7 +815,7 @@ static struct Keyword keyw[] = {
 			continue;
 		tail = [self tree];
 		tail->DTYP = TLST;
-		tail->DLEF = [self syn2: seg end: q];
+		tail->DLEF = [self synasg: seg end: q];
 		tail->DRIT = 0;
 		*link = tail;
 		link = &tail->DRIT;
@@ -823,7 +823,7 @@ static struct Keyword keyw[] = {
 	}
 	tail = [self tree];
 	tail->DTYP = TLST;
-	tail->DLEF = [self syn2: seg end: rp];
+	tail->DLEF = [self synasg: seg end: rp];
 	tail->DRIT = 0;
 	*link = tail;
 	return(head);
@@ -902,9 +902,9 @@ static struct Keyword keyw[] = {
 
 /*
  * doStatement
- *	DO; syn1 END
- *	DO WHILE syn3; syn1 END
- *	DO variable = syn3 TO syn3; syn1 END
+ *	DO; synstmt END
+ *	DO WHILE synor; synstmt END
+ *	DO variable = synor TO synor; synstmt END
  *
  * the iterative form desugars to an assignment and a
  * WHILE loop over existing node types, so no new code
@@ -937,13 +937,13 @@ static struct Keyword keyw[] = {
 			return(0);
 		}
 		t->DTYP = TWHILE;
-		t->DLEF = [self syn3: p+1 end: semi];
+		t->DLEF = [self synor: p+1 end: semi];
 		q = semi+1;
 		while(q != m && (strcmp(*q, ";") == 0 || strcmp(*q, "\n") == 0))
 			q++;
 		t->DRIT = 0;
 		if(q != m)
-			t->DRIT = [self syn1: q end: m];
+			t->DRIT = [self synstmt: q end: m];
 		return(t);
 	}
 	if(p != m && [self wordIs: *p name: "case"]) {
@@ -952,7 +952,7 @@ static struct Keyword keyw[] = {
 			[self error: ERR_SYNTAX code: 255];
 			return(0);
 		}
-		sel = [self syn3: p+1 end: semi];
+		sel = [self synor: p+1 end: semi];
 		k = [self splitCase: semi+1 end: m into: stmts];
 		if(k < 0)
 			return(0);
@@ -992,14 +992,14 @@ static struct Keyword keyw[] = {
 			[self error: ERR_SYNTAX code: 255];
 			return(0);
 		}
-		e1 = [self syn3: p+2 end: topos];
-		e2 = [self syn3: topos+1 end: semi];
+		e1 = [self synor: p+2 end: topos];
+		e2 = [self synor: topos+1 end: semi];
 		q = semi+1;
 		while(q != m && (strcmp(*q, ";") == 0 || strcmp(*q, "\n") == 0))
 			q++;
 		body = 0;
 		if(q != m)
-			body = [self syn1: q end: m];
+			body = [self synstmt: q end: m];
 		v1 = [self tree];
 		v1->DTYP = TVAR;
 		v1->DARR[0] = var;
@@ -1050,19 +1050,19 @@ static struct Keyword keyw[] = {
 	t->DTYP = TBLOCK;
 	t->DLEF = 0;
 	if(p != m)
-		t->DLEF = [self syn1: p end: m];
+		t->DLEF = [self synstmt: p end: m];
 	return(t);
 }
 
 /*
- * syn2
- *	syn3
- *	syn3 = syn2
+ * synasg
+ *	synor
+ *	synor = synasg
  *
  * assignment is the loosest expression level and the only
  * right associative one, so it splits at the first '='
  */
-- (struct Tree *) syn2: (char **) p1 end: (char **) p2
+- (struct Tree *) synasg: (char **) p1 end: (char **) p2
 {
 	register char **p;
 	register struct Tree *t;
@@ -1085,26 +1085,26 @@ static struct Keyword keyw[] = {
 		if(l == 0 && (*p)[1] != '=') {
 			t = [self tree];
 			t->DTYP = TASG;
-			t->DLEF = [self syn3: p1 end: p];
-			t->DRIT = [self syn2: p+1 end: p2];
+			t->DLEF = [self synor: p1 end: p];
+			t->DRIT = [self synasg: p+1 end: p2];
 			return(t);
 		}
 	}
 	if(l == 0)
-		return [self syn3: p1 end: p2];
+		return [self synor: p1 end: p2];
 	[self error: ERR_SYNTAX code: 255];
 	return(0);
 }
 
 /*
- * syn3
- *	syn4
- *	syn3 OR syn4
- *	syn3 XOR syn4
+ * synor
+ *	synand
+ *	synor OR synand
+ *	synor XOR synand
  *
  * OR and XOR share the lowest level, after PL/M-80
  */
-- (struct Tree *) syn3: (char **) p1 end: (char **) p2
+- (struct Tree *) synor: (char **) p1 end: (char **) p2
 {
 	register char **p;
 	register struct Tree *t;
@@ -1118,8 +1118,8 @@ static struct Keyword keyw[] = {
 	if(q != 0) {
 		t = [self tree];
 		t->DTYP = TASG;
-		t->DLEF = [self syn3: p1 end: q];
-		t->DRIT = [self syn2: q+1 end: p2];
+		t->DLEF = [self synor: p1 end: q];
+		t->DRIT = [self synasg: q+1 end: p2];
 		return(t);
 	}
 	for(p=p1; p!=p2; p++)
@@ -1147,22 +1147,22 @@ static struct Keyword keyw[] = {
 	if(q != 0) {
 		t = [self tree];
 		t->DTYP = qc;
-		t->DLEF = [self syn3: p1 end: q];
-		t->DRIT = [self syn4: q+1 end: p2];
+		t->DLEF = [self synor: p1 end: q];
+		t->DRIT = [self synand: q+1 end: p2];
 		return(t);
 	}
 	if(l == 0)
-		return [self syn4: p1 end: p2];
+		return [self synand: p1 end: p2];
 	[self error: ERR_SYNTAX code: 255];
 	return(0);
 }
 
 /*
- * syn4
+ * synand
  *	synnot
- *	syn4 AND synnot
+ *	synand AND synnot
  */
-- (struct Tree *) syn4: (char **) p1 end: (char **) p2
+- (struct Tree *) synand: (char **) p1 end: (char **) p2
 {
 	register char **p;
 	register struct Tree *t;
@@ -1191,7 +1191,7 @@ static struct Keyword keyw[] = {
 	if(q != 0) {
 		t = [self tree];
 		t->DTYP = TAND2;
-		t->DLEF = [self syn4: p1 end: q];
+		t->DLEF = [self synand: p1 end: q];
 		t->DRIT = [self synnot: q+1 end: p2];
 		return(t);
 	}
@@ -1510,7 +1510,7 @@ static struct Keyword keyw[] = {
 
 /*
  * synun
- *	syn7
+ *	synprim
  *	- synun
  *	+ synun
  *	* synun
@@ -1543,7 +1543,7 @@ static struct Keyword keyw[] = {
 			return(t);
 		}
 	}
-	return [self syn7: p1 end: p2];
+	return [self synprim: p1 end: p2];
 }
 
 /*
@@ -1884,7 +1884,7 @@ static struct Keyword keyw[] = {
 		[self error: ERR_SYNTAX code: 255];
 		return(0);
 	}
-	t->DLEF = [self syn2: lp end: rp];
+	t->DLEF = [self synasg: lp end: rp];
 	return(t);
 }
 
@@ -1905,12 +1905,12 @@ static struct Keyword keyw[] = {
 		[self error: ERR_SYNTAX code: 255];
 		return(0);
 	}
-	t->DLEF = [self syn2: lp end: q];
+	t->DLEF = [self synasg: lp end: q];
 	if([self findComma: q+1 end: rp] != 0) {
 		[self error: ERR_SYNTAX code: 255];
 		return(0);
 	}
-	t->DRIT = [self syn2: q+1 end: rp];
+	t->DRIT = [self synasg: q+1 end: rp];
 	return(t);
 }
 
@@ -2285,13 +2285,13 @@ static struct Keyword keyw[] = {
 }
 
 /*
- * syn7
- *	( syn1 )
+ * synprim
+ *	( synstmt )
  *	keyword
  *	literal
  *	variable
  */
-- (struct Tree *) syn7: (char **) p1 end: (char **) p2
+- (struct Tree *) synprim: (char **) p1 end: (char **) p2
 {
 	register char **p;
 	char **lp, **rp, **lp2, **rp2;
@@ -2373,7 +2373,7 @@ static struct Keyword keyw[] = {
 			[self error: ERR_SYNTAX code: 255];
 		t = [self tree];
 		t->DTYP = TPAR;
-		t->DSTR = [self syn1: lp end: rp];
+		t->DSTR = [self synstmt: lp end: rp];
 		return(t);
 	}
 	if(n == 0) {
