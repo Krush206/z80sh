@@ -172,6 +172,20 @@
 	return orgflg = &ret;
 }
 
+- (int *) getOrgEnable
+{
+	static int ret;
+
+	return orgen = &ret;
+}
+
+- (int *) getCartEnable
+{
+	static int ret;
+
+	return carten = &ret;
+}
+
 - (int *) getMacroCount
 {
 	static int ret;
