@@ -45,6 +45,7 @@
 static struct Keyword keyw[] = {
 	{ "address", TADDR },
 	{ "and", TAND2 },
+	{ "based", TBASED },
 	{ "by", TBY },
 	{ "byte", TBYTE },
 	{ "call", TCALL },
@@ -2184,14 +2185,57 @@ static struct Keyword keyw[] = {
 }
 
 /*
+ * declItem
+ *	one comma-separated item of a DECLARE list, starting
+ *	at w[*ip]: NAME type or NAME BASED base type; returns
+ *	the node and advances *ip past the item, or 0 when the
+ *	item is malformed
+ */
+- (struct Tree *) declItem: (char **) w count: (int) n at: (int *) ip
+{
+	struct Tree *d;
+	int i, isbyte;
+
+	i = *ip;
+	if(![self nameOk: w[i]] || [self srchx: w[i]] != -1)
+		return(0);
+	d = [self tree];
+	d->DARR[0] = w[i];
+	if(i+1 < n && [self wordIs: w[i+1] name: "based"]) {
+		/* NAME BASED base type */
+		if(i+3 >= n || [self srchx: w[i+2]] != -1 ||
+		    ![self nameOk: w[i+2]])
+			return(0);
+		isbyte = [self wordIs: w[i+3] name: "byte"];
+		if(!isbyte && ![self wordIs: w[i+3] name: "address"])
+			return(0);
+		d->DTYP = TBASED;
+		d->DARR[1] = w[i+2];
+		if(!isbyte)
+			d->DARR[2] = "address";
+		*ip = i + 4;
+		return(d);
+	}
+	if(i+1 >= n)
+		return(0);
+	isbyte = [self wordIs: w[i+1] name: "byte"];
+	if(!isbyte && ![self wordIs: w[i+1] name: "address"])
+		return(0);
+	d->DTYP = isbyte ? TDECL : TADDR;
+	*ip = i + 2;
+	return(d);
+}
+
+/*
  * groupDecl
  *	DECLARE (a, b, ...) type as chained declaration
- *	nodes; every item must be one plain name
+ *	nodes; every item is one plain name or NAME BASED
+ *	base, sharing the single type that follows
  */
 - (struct Tree *) groupDecl: (char **) p1 args: (char **) lp end: (char **) rp
 {
 	struct Tree *t, *rest, *d;
-	char *names[ARGSIZ];
+	char *names[ARGSIZ], *bases[ARGSIZ];
 	char **q, **seg;
 	int k, l, type;
 
@@ -2205,19 +2249,21 @@ static struct Keyword keyw[] = {
 	k = 0;
 	seg = lp;
 	l = 0;
-	for(q = lp; q != rp; q++) {
-		if(strcmp(*q, "(") == 0) {
-			l++;
-			continue;
+	for(q = lp; ; q++) {
+		if(q != rp) {
+			if(strcmp(*q, "(") == 0) {
+				l++;
+				continue;
+			}
+			if(strcmp(*q, ")") == 0) {
+				l--;
+				continue;
+			}
+			if(l != 0 || strcmp(*q, ",") != 0)
+				continue;
 		}
-		if(strcmp(*q, ")") == 0) {
-			l--;
-			continue;
-		}
-		if(l != 0 || strcmp(*q, ",") != 0)
-			continue;
-		if(q == seg || q != seg+1 ||
-		    [self srchx: *seg] != -1 || ![self nameOk: *seg]) {
+		if(seg == q || [self srchx: *seg] != -1 ||
+		    ![self nameOk: *seg]) {
 			[self error: ERR_SYNTAX code: 255];
 			return(0);
 		}
@@ -2225,25 +2271,35 @@ static struct Keyword keyw[] = {
 			[self error: ERR_LARGE code: 255];
 			return(0);
 		}
+		bases[k] = 0;
+		if(q - seg != 1) {
+			/* NAME BASED base */
+			if(q - seg != 3 ||
+			    ![self wordIs: seg[1] name: "based"] ||
+			    [self srchx: seg[2]] != -1 ||
+			    ![self nameOk: seg[2]]) {
+				[self error: ERR_SYNTAX code: 255];
+				return(0);
+			}
+			bases[k] = seg[2];
+		}
 		names[k++] = *seg;
+		if(q == rp)
+			break;
 		seg = q+1;
 	}
-	if(seg == rp || rp != seg+1 ||
-	    [self srchx: *seg] != -1 || ![self nameOk: *seg]) {
-		[self error: ERR_SYNTAX code: 255];
-		return(0);
-	}
-	if(k == ARGSIZ) {
-		[self error: ERR_LARGE code: 255];
-		return(0);
-	}
-	names[k++] = *seg;
 	t = 0;
 	while(k > 0) {
 		k--;
 		d = [self tree];
 		d->DTYP = type;
 		d->DARR[0] = names[k];
+		if(bases[k] != 0) {
+			d->DTYP = TBASED;
+			d->DARR[1] = bases[k];
+			if(type == TADDR)
+				d->DARR[2] = "address";
+		}
 		if(t == 0)
 			t = d;
 		else {
@@ -2516,12 +2572,14 @@ static struct Keyword keyw[] = {
 		if(n == 2 && [self srchx: w[0]] == TDECL)
 			return [self groupDecl: w args: lp end: rp];
 		if(n >= 3 && [self srchx: w[0]] == TDECL &&
+		    ![self wordIs: w[2] name: "based"] &&
 		    [self wordIs: w[n-1] name: "data"]) {
 			if(lp2 != 0)
 				return [self dataDecl: w args: lp2 end: rp2];
 			return [self dataDecl: w args: lp end: rp];
 		}
 		if(n >= 3 && [self srchx: w[0]] == TDECL &&
+		    ![self wordIs: w[2] name: "based"] &&
 		    [self wordIs: w[n-1] name: "initial"]) {
 			if(lp2 != 0)
 				return [self initialDecl: w count: n
@@ -2560,19 +2618,12 @@ static struct Keyword keyw[] = {
 		   the comma-split DECLARE a type, b type, ... */
 		if(n > 3) {
 			struct Tree *seg[ARGSIZ], *dl;
-			int i, nc, isbyte;
+			int i, nc;
 
 			nc = 0;
 			for(i = 1; i < n; ) {
-				if(i + 1 >= n || ![self nameOk: w[i]] ||
-				    [self srchx: w[i]] != -1 ||
-				    strcmp(w[i], ",") == 0) {
-					[self error: ERR_SYNTAX code: 255];
-					return(0);
-				}
-				isbyte = [self wordIs: w[i+1] name: "byte"];
-				if(!isbyte &&
-				    ![self wordIs: w[i+1] name: "address"]) {
+				dl = [self declItem: w count: n at: &i];
+				if(dl == 0) {
 					[self error: ERR_SYNTAX code: 255];
 					return(0);
 				}
@@ -2580,11 +2631,7 @@ static struct Keyword keyw[] = {
 					[self error: ERR_LARGE code: 255];
 					return(0);
 				}
-				dl = [self tree];
-				dl->DTYP = isbyte ? TDECL : TADDR;
-				dl->DARR[0] = w[i];
 				seg[nc++] = dl;
-				i += 2;
 				if(i == n)
 					break;
 				if(strcmp(w[i], ",") != 0) {
@@ -2657,6 +2704,7 @@ static struct Keyword keyw[] = {
 	case TNOT:
 	case TBY:
 	case TBYTE:
+	case TBASED:
 	case TAND2:
 	case TOR2:
 	case TXOR:
