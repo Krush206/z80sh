@@ -2148,6 +2148,42 @@ static struct Keyword keyw[] = {
 }
 
 /*
+ * orgValue
+ *	the address given to -o: a PL/M constant, a C style
+ *	0x hexadecimal word, or -1 when it is neither
+ */
+- (int) orgValue: (char *) s
+{
+	int v, d, hex;
+	char c;
+
+	hex = 0;
+	if(s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
+		hex = 1;
+		s += 2;
+	}
+	if(!hex)
+		return([self numberValue: s]);
+	if(*s == '\0')
+		return(-1);
+	v = 0;
+	while((c = *s++) != '\0') {
+		if(c >= '0' && c <= '9')
+			d = c - '0';
+		else if(c >= 'a' && c <= 'f')
+			d = c - 'a' + 10;
+		else if(c >= 'A' && c <= 'F')
+			d = c - 'A' + 10;
+		else
+			return(-1);
+		v = v * 16 + d;
+		if(v > 0xFFFF)
+			return(-1);
+	}
+	return(v);
+}
+
+/*
  * groupDecl
  *	DECLARE (a, b, ...) type as chained declaration
  *	nodes; every item must be one plain name
