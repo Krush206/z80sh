@@ -189,10 +189,12 @@ procedure is invoked with `CALL` and a typed one in an
 expression, again after PL/M-80. `RETURN;` and
 `RETURN expression;` both work.
 
-Calls follow the PL/M-80 convention: the last two arguments
-arrive in `E` and `C`, earlier ones on the stack (deepest
-first), and arguments evaluate left to right. Procedures are
-non-recursive, since parameters live in static storage.
+Calls follow the PL/M-80 convention: a single argument
+arrives in `C`; with two or more, the last is in `E` and the
+one before it in `C`; earlier arguments travel on the stack,
+deepest first. Arguments evaluate left to right, and
+procedures are non-recursive, since parameters live in
+static storage.
 
 An interrupt procedure is `name: PROCEDURE INTERRUPT n;`
 (no parameters, no result type). Its body saves and restores
@@ -235,7 +237,7 @@ never freed) and run the suite:
 
 The suite rebuilds the compiler and checks exit codes,
 diagnostics, emitted assembly and final image bytes for
-182 programs, including one rejection test per non-PL/M
+184 programs, including one rejection test per non-PL/M
 spelling (`int`, `==`, `!=`, `!`, `&&`, `||`, `&`, `|`,
 `^`, `%`, bare `WHILE`, `THEN`-less `IF`, `{`/`}`,
 `//` comments).
