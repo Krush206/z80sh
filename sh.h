@@ -84,6 +84,9 @@
 #define DRIT t_drit
 #define DARR t_darr
 #define DSTR t_dtre
+/* a procedure node's interrupt flag, clear of the parameter
+   names in DARR[3 .. 3+npar-1] */
+#define DINT t_darr[ARGSIZ-1]
 
 #define LINSIZ 4000
 #define ARGSIZ 200
