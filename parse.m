@@ -471,8 +471,10 @@ static struct Keyword keyw[] = {
 		}
 	}
 	t->DARR[2] = strdup([self integerToASCII: n]);
-	/* the body ends at END, the optional name follows */
-	if(m+1 != e && ![self nameEq: *(m+1) other: *p1]) {
+	/* the body ends at END; the optional name follows, or a
+	   separator when further statements follow in the list */
+	if(m+1 != e && ![self nameEq: *(m+1) other: *p1] &&
+	    !((*(m+1))[1] == '\0' && (**(m+1) == ';' || **(m+1) == '\n'))) {
 		[self error: ERR_SYNTAX code: 255];
 		return(0);
 	}
@@ -787,7 +789,9 @@ static struct Keyword keyw[] = {
 /*
  * callStmt
  *	CALL name; or CALL name(expr, ...); — a TCALL node
- *	with one TLST per argument expression in DLEF
+ *	with one TLST per argument expression in DLEF; the
+ *	untyped built-in TIME is invoked the same way as
+ *	CALL TIME(expr);, never in an expression
  */
 - (struct Tree *) callStmt: (char **) p1 end: (char **) p2
 {
@@ -801,7 +805,24 @@ static struct Keyword keyw[] = {
 	    (**(p2-1) == ';' || **(p2-1) == '\n'))
 		p2--;
 	q = p1+1;
-	if(q == p2 || [self srchx: *q] != -1 || ![self nameOk: *q]) {
+	if(q == p2 || ![self nameOk: *q]) {
+		[self error: ERR_SYNTAX code: 255];
+		return(0);
+	}
+	/* TIME is an untyped procedure: CALL TIME(expr); */
+	if([self srchx: *q] == TTIME) {
+		if(q+1 == p2 || strcmp(*(q+1), "(") != 0) {
+			[self error: ERR_SYNTAX code: 255];
+			return(0);
+		}
+		rp = [self matchParen: q+1 end: p2];
+		if(rp == 0 || rp+1 != p2) {
+			[self error: ERR_SYNTAX code: 255];
+			return(0);
+		}
+		return [self call: TTIME args: q+2 end: rp];
+	}
+	if([self srchx: *q] != -1) {
 		[self error: ERR_SYNTAX code: 255];
 		return(0);
 	}
@@ -2403,7 +2424,7 @@ static struct Keyword keyw[] = {
 		else
 			k = -1;
 		if(k == TINPUT || k == TOUTPUT || k == TLOW ||
-		    k == THIGH || k == TDOUBLE || k == TTIME)
+		    k == THIGH || k == TDOUBLE)
 			return [self call: k args: lp end: rp];
 		if(k == TSHL || k == TSHR || k == TROL ||
 		    k == TROR || k == TSCL || k == TSCR)
