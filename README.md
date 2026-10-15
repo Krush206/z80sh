@@ -80,8 +80,11 @@ rejects the rest as undeclared rather than misreading them.
 - Arrays of either type, with subscripts from 0:
   supported; an `ADDRESS` array indexes two bytes per
   element.
-- `BASED` variables addressed through a pointer: planned.
-  Until then, pointer dereference is spelled `*p`.
+- `BASED` variables: `DECLARE v BASED p BYTE;` names the
+  object at the address held by the `ADDRESS` scalar `p`,
+  with no storage of its own. The base must be a plain,
+  already declared `ADDRESS` scalar. Supported; pointer
+  dereference may also be spelled `*p`.
 
 ## Constants
 
@@ -173,6 +176,7 @@ Supported today:
     DECLARE name (size) BYTE;      arrays, subscripts 0..size-1
     DECLARE name BYTE INITIAL (v, ...);   preset bytes
     DECLARE name DATA (v, ...);    ROM-resident bytes
+    DECLARE name BASED base BYTE;  at the base's address
     DECLARE name LITERALLY 'text'; source substitution
     DECLARE name LABEL;            a GOTO target
 
@@ -189,11 +193,16 @@ the variable at its declaration, so the storage is preset
 at run time; `DATA` names ROM-resident bytes directly and
 takes no writable storage. A `LITERALLY` macro substitutes
 its text at parse time and declares no storage. A `LABEL`
-declares a `GOTO` target and no storage.
+declares a `GOTO` target and no storage. A `BASED` name
+declares no storage either: it reads and writes the object
+at the address held by its base, like `*base`. The base
+must be a plain, already declared `ADDRESS` scalar, and the
+group form (`DECLARE (v BASED p, ...) BYTE;`) applies the
+base to each name.
 
 Planned, in this order:
 
-    DECLARE p ADDRESS, v BASED p BYTE;
+    ADDRESS parameters;
 
 ## Procedures
 
@@ -262,7 +271,7 @@ never freed) and run the suite:
 
 The suite rebuilds the compiler and checks exit codes,
 diagnostics, emitted assembly and final image bytes for
-212 programs, including one rejection test per non-PL/M
+227 programs, including one rejection test per non-PL/M
 spelling (`int`, `==`, `!=`, `!`, `&&`, `||`, `&`, `|`,
 `^`, `%`, bare `WHILE`, `THEN`-less `IF`, `{`/`}`,
 `//` comments).
