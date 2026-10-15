@@ -48,11 +48,27 @@ loop:
 		goto loop;
 
 	case '\'':
-		/* 'c' : single character value, no escapes */
+		/* 'c' : single character converts to its numeric
+		   value; '..longer..' stays a quoted string word */
 		c = [self getRawCharacter];
 		c1 = [self getRawCharacter];
-		if(c1 != '\'')
-			[self error: ERR_SYNTAX code: 255];
+		if(c1 != '\'') {
+			if(c == '\'' || c == '\n') {
+				[self error: ERR_SYNTAX code: 255];
+				return;
+			}
+			*(*linep)++ = c|QUOTE;
+			while(c1 != '\'' && c1 != '\n') {
+				*(*linep)++ = c1|QUOTE;
+				c1 = [self getRawCharacter];
+			}
+			if(c1 != '\'') {
+				[self error: ERR_SYNTAX code: 255];
+				return;
+			}
+			*(*linep)++ = '\0';
+			return;
+		}
 		if(*linep + 4 > *elinep)
 			[self error: ERR_CHAR code: 255];
 		(void) strcpy(*linep, [self integerToASCII: c&0177]);
