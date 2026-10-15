@@ -196,6 +196,7 @@ struct Tree {
 - (void) emitArgs: (struct Tree *) list;
 - (void) emitCall: (struct Tree *) t;
 - (void) defineProc: (struct Tree *) t;
+- (void) storeParam: (int) i lo: (char) lo;
 - (int) procIndex: (char *) na;
 @end
 
