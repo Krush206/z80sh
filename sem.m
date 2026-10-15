@@ -978,6 +978,25 @@ static int leadingDecls(struct Tree *body, struct Tree **dst, int max)
             break;
         }
 
+        case TDOFOR: {
+            register int lb, ln;
+
+            /* Iterative DO: the loop body ends with the index
+               addition, so loop back only when that add did not
+               carry.  A wrapping index ends the loop instead of
+               repeating it, matching the reference. */
+            lb = (*lblc)++;
+            ln = (*lblc)++;
+            printf("L%d:\n", lb);
+            [self compileTree: t->DLEF];
+            printf("\tor a\n");
+            printf("\tjr z, L%d\n", ln);
+            [self compileTree: t->DRIT];
+            printf("\tjr nc, L%d\n", lb);
+            printf("L%d:\n", ln);
+            break;
+        }
+
         case TLENGTH:
         case TLAST: {
             int i, n;
