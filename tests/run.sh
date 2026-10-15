@@ -1308,6 +1308,28 @@ DECLARE X BYTE;
 X = F(5);
 EOF
 
+# parameters take their own static storage; a variable
+# declared after the procedure must not reuse their RAM, as
+# the reference compiler gives each its own slot
+cat > "$TMP/t.in" <<'EOF'
+ADDU: PROCEDURE(A, B) BYTE;
+DECLARE A BYTE, B BYTE;
+RETURN A - B;
+END ADDU;
+DECLARE X BYTE;
+X = ADDU(10, 3);
+EOF
+if ! timeout 5 "$CSH" < "$TMP/t.in" > "$TMP/t.asm" 2> "$TMP/t.err"; then
+	fail proc-params-own-storage "exit=$? stderr=[$(cat "$TMP/t.err")]"
+elif [ -n "$(grep -E '^[A-Za-z_][A-Za-z0-9_]*:[[:space:]]*equ[[:space:]]*0x' \
+	"$TMP/t.asm" | sed 's/.*equ[[:space:]]*//' | sort | uniq -d)" ]; then
+	fail proc-params-own-storage "two storage symbols share an address"
+elif ! z80asm -o "$TMP/t.bin" "$TMP/t.asm" 2> "$TMP/t.asserr"; then
+	fail proc-params-own-storage "z80asm rejected output: [$(cat "$TMP/t.asserr")]"
+else
+	pass proc-params-own-storage
+fi
+
 # --- labels -------------------------------------------------
 
 t_grep label-declared "L_x:" "jp L_x" <<'EOF'
