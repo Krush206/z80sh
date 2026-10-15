@@ -104,6 +104,33 @@ t_grep() {
 	pass "$name"
 }
 
+# t_nogrep <name> <pattern>... : like t_ok, plus no extended
+# regexp pattern may match any line of the assembly.
+t_nogrep() {
+	name=$1
+	shift
+	cat > "$TMP/t.in"
+	if ! timeout 5 "$CSH" < "$TMP/t.in" > "$TMP/t.asm" 2> "$TMP/t.err"; then
+		fail "$name" "exit=$? stderr=[$(cat "$TMP/t.err")]"
+		return
+	fi
+	if [ -s "$TMP/t.err" ]; then
+		fail "$name" "stderr not empty: [$(cat "$TMP/t.err")]"
+		return
+	fi
+	for pat in "$@"; do
+		if grep -Eq "$pat" "$TMP/t.asm"; then
+			fail "$name" "assembly has /$pat/"
+			return
+		fi
+	done
+	if ! z80asm -o "$TMP/t.bin" "$TMP/t.asm" 2> "$TMP/t.asserr"; then
+		fail "$name" "z80asm rejected output: [$(cat "$TMP/t.asserr")]"
+		return
+	fi
+	pass "$name"
+}
+
 # t_order <name> <first> <second> : like t_ok, plus the
 # first pattern must match on an earlier assembly line
 # than the second (proves evaluation order).
@@ -1257,6 +1284,28 @@ EOF
 t_err intr-with-type 255 "syntax error" <<'EOF'
 T: PROCEDURE BYTE INTERRUPT 1;
 END T;
+EOF
+
+# a plain procedure must not save registers the way an
+# interrupt handler does
+t_nogrep proc-no-interrupt-save "push de" "^ei\$" <<'EOF'
+F: PROCEDURE(A, B) BYTE;
+DECLARE A BYTE, B BYTE;
+RETURN A - B;
+END F;
+DECLARE X BYTE;
+X = F(1, 2);
+EOF
+
+# a single argument is passed in C on both sides, as in
+# PL/M-80, not in E
+t_grep proc-one-param-in-c "Q_f:" "ld \(hl\), c" "ld c, a" <<'EOF'
+F: PROCEDURE(A) BYTE;
+DECLARE A BYTE;
+RETURN A;
+END F;
+DECLARE X BYTE;
+X = F(5);
 EOF
 
 # --- labels -------------------------------------------------
