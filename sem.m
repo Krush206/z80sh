@@ -1336,12 +1336,16 @@ static int leadingDecls(struct Tree *body, struct Tree **dst, int max)
 			printf("\tld a, l\n");
 		printf("\tpush af\n");
 	}
-	/* the last two become E and C; earlier ones stay for the
-	   callee to pop, arg0 deepest */
-	if(n >= 1)
-		printf("\tpop af\n\tld e, a\n");
-	if(n >= 2)
+	/* a lone argument goes to C; with two or more the last
+	   is E and the one before it C, after PL/M-80; earlier
+	   ones stay on the stack for the callee to pop, arg0
+	   deepest */
+	if(n == 1)
 		printf("\tpop af\n\tld c, a\n");
+	else if(n >= 2) {
+		printf("\tpop af\n\tld e, a\n");
+		printf("\tpop af\n\tld c, a\n");
+	}
 }
 
 /*
@@ -1418,7 +1422,7 @@ static int leadingDecls(struct Tree *body, struct Tree **dst, int max)
 	prcret[pi] = ret;
 	/* interrupt procedures are void and parameterless and
 	   save every register across the handler */
-	ip = t->DARR[4] != 0;
+	ip = t->DINT != 0;
 	/* params become block-level storage */
 	lv = *scope;
 	n = *symc;
@@ -1455,14 +1459,18 @@ static int leadingDecls(struct Tree *body, struct Tree **dst, int max)
 		    symadr[prcadr[pi][i]]);
 		decls[i]->DTYP = TNOP;
 	}
-	/* entry stores: last param in E, prior in C, rest
-	   popped back off the stack */
-	if(npar >= 1) {
+	/* entry stores: a lone parameter arrives in C; with two
+	   or more the last is in E and the one before it in C;
+	   the rest are popped back off the stack */
+	if(npar == 1) {
+		i = prcadr[pi][0];
+		printf("\tld hl, %s\n", symlab[i]);
+		printf("\tld (hl), c\n");
+	}
+	if(npar >= 2) {
 		i = prcadr[pi][npar - 1];
 		printf("\tld hl, %s\n", symlab[i]);
 		printf("\tld (hl), e\n");
-	}
-	if(npar >= 2) {
 		i = prcadr[pi][npar - 2];
 		printf("\tld hl, %s\n", symlab[i]);
 		printf("\tld (hl), c\n");
