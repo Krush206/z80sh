@@ -220,6 +220,7 @@ struct Tree {
 - (int) wordIs: (char *) w name: (const char *) s;
 - (int) nameOk: (char *) na;
 - (int) doDepth: (char **) p1 end: (char **) p2;
+- (int) labelHang: (char **) p1 end: (char **) p2;
 - (char **) matchEnd: (char **) p1 end: (char **) p2;
 - (char **) endPast: (char **) m end: (char **) p2;
 - (char **) matchParen: (char **) p1 end: (char **) p2;
@@ -246,6 +247,7 @@ struct Tree {
 - (void) stripDollar: (char *) s;
 - (struct Tree *) doStatement: (char **) p1 end: (char **) p2;
 - (struct Tree *) procDef: (char **) p1 end: (char **) p2;
+- (char **) procName: (char **) p1 end: (char **) p2;
 - (struct Tree *) callStmt: (char **) p1 end: (char **) p2;
 - (struct Tree *) argList: (char **) lp end: (char **) rp;
 - (struct Tree *) literalDecl: (char *) na value: (char *) val;
