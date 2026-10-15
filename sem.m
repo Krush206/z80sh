@@ -270,8 +270,7 @@ static int leadingDecls(struct Tree *body, struct Tree **dst, int max)
 {
     if (t == 0)
 	    return;
-    if(*orgflg == 0) {
-        printf("\torg %d\n", ORGADR);
+    if(*orgen != 0 && *orgflg == 0) {
         (*orgflg)++;
         [self prologue];
     }
@@ -1224,6 +1223,7 @@ static int leadingDecls(struct Tree *body, struct Tree **dst, int max)
 - (void) prologue
 {
 	/* vectors, boot and silence, after the reference manual */
+	printf("\torg %d\n", ORGADR);
 	printf("\tjp start\n");
 	printf("\tdefs 0x35\n");
 	printf("\tret\n");
