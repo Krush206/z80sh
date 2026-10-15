@@ -210,6 +210,19 @@ static int leadingDecls(struct Tree *body, struct Tree **dst, int max)
 			[self printString: t->DARR[0]];
 			[self error: ERR_UNDECL code: 255];
 		}
+		if(symbas[i] >= 0) {
+			/* a based object read through its pointer */
+			printf("\tld hl, (%s)\n", symlab[symbas[i]]);
+			printf("\tld a, (hl)\n");
+			if([self symbolType: i]) {
+				printf("\tinc hl\n");
+				printf("\tld h, (hl)\n");
+				printf("\tld l, a\n");
+				return;
+			}
+			[self toHL];
+			return;
+		}
 		if([self symbolType: i]) {
 			printf("\tld hl, (%s)\n", symlab[i]);
 			return;
@@ -302,6 +315,18 @@ static int leadingDecls(struct Tree *body, struct Tree **dst, int max)
                 [self error: ERR_SYNTAX code: 255];
             }
             // Address values load into HL, bytes into A
+            if(symbas[i] >= 0) {
+                /* the variable lives at the address held by
+                   its base; read through that pointer */
+                printf("\tld hl, (%s)\n", symlab[symbas[i]]);
+                printf("\tld a, (hl)\n");
+                if([self symbolType: i]) {
+                    printf("\tinc hl\n");
+                    printf("\tld h, (hl)\n");
+                    printf("\tld l, a\n");
+                }
+                break;
+            }
             if([self symbolType: i])
                 printf("\tld hl, (%s)\n", symlab[i]);
             else
@@ -360,6 +385,14 @@ static int leadingDecls(struct Tree *body, struct Tree **dst, int max)
             /* Name two bytes of RAM for the declared address */
             i = [self declareName: t->DARR[0] type: TADDR];
             printf("%s:\tequ 0x%X\n", symlab[i], symadr[i]);
+            break;
+        }
+
+        case TBASED: {
+            /* the based variable has no storage of its own */
+            (void) [self declareBased: t->DARR[0]
+                type: (t->DARR[2] != 0) ? TADDR : TDECL
+                base: t->DARR[1]];
             break;
         }
 
@@ -537,6 +570,26 @@ static int leadingDecls(struct Tree *body, struct Tree **dst, int max)
             }
             if([self arraySize: i] > 0) {
                 [self error: ERR_SYNTAX code: 255];
+            }
+            if(symbas[i] >= 0) {
+                /* store through the base pointer */
+                if([self symbolType: i]) {
+                    [self compile16: t->DRIT];
+                    printf("\tpush hl\n");
+                    printf("\tld hl, (%s)\n", symlab[symbas[i]]);
+                    printf("\tpop de\n");
+                    printf("\tld (hl), e\n");
+                    printf("\tinc hl\n");
+                    printf("\tld (hl), d\n");
+                }
+                else {
+                    [self compileTree: t->DRIT];
+                    if([self exprType: t->DRIT])
+                        printf("\tld a, l\n");
+                    printf("\tld hl, (%s)\n", symlab[symbas[i]]);
+                    printf("\tld (hl), a\n");
+                }
+                break;
             }
             // Evaluate expression value on the right branch
             if([self symbolType: i]) {
@@ -1567,6 +1620,7 @@ static int leadingDecls(struct Tree *body, struct Tree **dst, int max)
 	symtyp[*symc] = t;
 	symlev[*symc] = *scope;
 	symsiz[*symc] = 0;
+	symbas[*symc] = -1;
 	size = (t == TADDR) ? 2 : 1;
 	if(*ramc + size > STACKP) {
 		/* keep clear of the stack base and the reserved top eight */
@@ -1615,6 +1669,7 @@ static int leadingDecls(struct Tree *body, struct Tree **dst, int max)
 	symtyp[*symc] = t;
 	symlev[*symc] = *scope;
 	symsiz[*symc] = n;
+	symbas[*symc] = -1;
 	if(n > 255) {
 		/* subscripts are bytes, so larger arrays
 		   strand their LENGTH past ld a */
@@ -1627,6 +1682,64 @@ static int leadingDecls(struct Tree *body, struct Tree **dst, int max)
 	}
 	symadr[*symc] = *ramc;
 	*ramc += size;
+	if(*scope == 0)
+		(void) strcpy(symlab[*symc], symnam[*symc]);
+	else {
+		(void) strcpy(symlab[*symc], symnam[*symc]);
+		(void) strcat(symlab[*symc], "_");
+		(void) strcat(symlab[*symc], [self integerToASCII: (*lblc)++]);
+	}
+	return((*symc)++);
+}
+
+/*
+ * declareBased
+ *	a variable with no storage of its own: it stands for
+ *	the object at the address held by its base, which
+ *	must be a plain ADDRESS scalar already declared
+ */
+- (int) declareBased: (char *) na type: (int) t base: (char *) bn
+{
+	char *s, *d;
+	int i, b;
+	unsigned char c;
+
+	for(i = *symc - 1; i >= 0 && symlev[i] == *scope; i--)
+		if(nameEqual(symnam[i], na)) {
+			[self printString: na];
+			[self error: ERR_REDECL code: 255];
+		}
+	b = [self lookupName: bn];
+	if(b < 0) {
+		[self printString: bn];
+		[self error: ERR_UNDECL code: 255];
+	}
+	if(symtyp[b] != TADDR || symsiz[b] > 0 || symbas[b] >= 0) {
+		[self printString: bn];
+		[self error: ERR_BASE code: 255];
+	}
+	if(*symc == SYMSIZ) {
+		[self error: ERR_LARGE code: 255];
+	}
+	s = na;
+	d = symnam[*symc];
+	while(*s) {
+		c = (unsigned char) *s++;
+		if(c == '$')
+			continue;
+		if(c >= 'A' && c <= 'Z')
+			c = c + 'a' - 'A';
+		if(d >= symnam[*symc] + SYMNAMSIZ - 1) {
+			[self error: ERR_LARGE code: 255];
+		}
+		*d++ = (char) c;
+	}
+	*d = '\0';
+	symtyp[*symc] = t;
+	symlev[*symc] = *scope;
+	symsiz[*symc] = 0;
+	symadr[*symc] = 0;
+	symbas[*symc] = b;
 	if(*scope == 0)
 		(void) strcpy(symlab[*symc], symnam[*symc]);
 	else {
