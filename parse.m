@@ -120,11 +120,30 @@ static struct Keyword keyw[] = {
 
 	if(p1 == p2)
 		return(0);
-	/* name: PROCEDURE ... END name; spans statements */
-	if(p2 >= p1+3 && [self nameOk: *p1] &&
-	    [self srchx: *p1] == -1 && strcmp(*(p1+1), ":") == 0 &&
-	    [self wordIs: *(p1+2) name: "procedure"])
-		return [self statement: p1 end: p2];
+	/* name: PROCEDURE ... END name; spans statements; the
+	   statements after END name run on as the rest of the
+	   list, as they do at the top level */
+	if([self procName: p1 end: p2] != 0) {
+		char **m, **r;
+		struct Tree *def, *rest, *both;
+
+		def = [self statement: p1 end: p2];
+		m = [self matchProc: p1 end: p2];
+		r = p2;
+		if(m != 0) {
+			r = m + 1;
+			if(r != p2 && [self nameEq: *r other: *p1])
+				r++;
+		}
+		rest = [self syntax: r end: p2];
+		if(rest == 0)
+			return(def);
+		both = [self tree];
+		both->DTYP = TLST;
+		both->DLEF = def;
+		both->DRIT = rest;
+		return(both);
+	}
 	/* label: statement — plain or structured */
 	if(p2 >= p1+2 && strcmp(*(p1+1), ":") == 0 &&
 	    [self srchx: *p1] == -1 && [self nameOk: *p1]) {
@@ -328,6 +347,28 @@ static struct Keyword keyw[] = {
 }
 
 /*
+ * procName
+ *	the PROCEDURE word of the name: PROCEDURE header at p1,
+ *	or 0 when p1 does not start one; a newline between the
+ *	colon and PROCEDURE is noise, since PL/M ignores line
+ *	breaks inside a header
+ */
+- (char **) procName: (char **) p1 end: (char **) p2
+{
+	char **h;
+
+	if(p2 < p1+2 || ![self nameOk: *p1] || [self srchx: *p1] != -1 ||
+	    strcmp(*(p1+1), ":") != 0)
+		return(0);
+	h = p1 + 2;
+	while(h != p2 && **h == '\n')
+		h++;
+	if(h == p2 || ![self wordIs: *h name: "procedure"])
+		return(0);
+	return(h);
+}
+
+/*
  * statement
  *	if ( synor ) THEN synstmt
  *	if ( synor ) THEN synstmt else synstmt
@@ -356,8 +397,11 @@ static struct Keyword keyw[] = {
 		[self error: ERR_SYNTAX code: 255];
 		return(0);
 	}
-	/* optional parameter list right after PROCEDURE */
-	q = p1+3;
+	/* optional parameter list right after PROCEDURE; a
+	   newline after the colon or PROCEDURE is noise */
+	q = [self procName: p1 end: m] + 1;
+	while(q != m && **q == '\n')
+		q++;
 	lp = 0;
 	rp = 0;
 	if(q != m && strcmp(*q, "(") == 0) {
@@ -369,6 +413,8 @@ static struct Keyword keyw[] = {
 		}
 		q = rp+1;
 	}
+	while(q != m && **q == '\n')
+		q++;
 	/* optional BYTE or ADDRESS result type */
 	t = [self tree];
 	t->DTYP = TPROCEDURE;
@@ -460,9 +506,7 @@ static struct Keyword keyw[] = {
 	k = [self srchx: *p1];
 	if(k == TDO)
 		return [self doStatement: p1 end: p2];
-	if(p2 >= p1+3 && [self nameOk: *p1] && [self srchx: *p1] == -1 &&
-	    strcmp(*(p1+1), ":") == 0 &&
-	    [self wordIs: *(p1+2) name: "procedure"])
+	if([self procName: p1 end: p2] != 0)
 		return [self procDef: p1 end: p2];
 	if(k == TCALL)
 		return [self callStmt: p1 end: p2];
@@ -1746,6 +1790,27 @@ static struct Keyword keyw[] = {
 			d--;
 	}
 	return(d);
+}
+
+/*
+ * labelHang
+ *	1 when the word range ends with a label (name :) whose
+ *	statement must follow on the next line; name: alone is
+ *	not a statement, so the reader keeps the line open
+ */
+- (int) labelHang: (char **) p1 end: (char **) p2
+{
+	char **p;
+
+	if(p2 == NULL)
+		return(0);
+	p = p2;
+	while(p != p1 && strcmp(*(p-1), "\n") == 0)
+		p--;
+	if(p - p1 < 2)
+		return(0);
+	return(strcmp(*(p-1), ":") == 0 && [self nameOk: *(p-2)] &&
+	    [self srchx: *(p-2)] == -1);
 }
 
 /*
