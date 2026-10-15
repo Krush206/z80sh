@@ -194,7 +194,7 @@ t_err() {
 t_rom() {
 	name=$1
 	cat > "$TMP/t.in"
-	if ! timeout 5 "$CSH" -o -h < "$TMP/t.in" > "$TMP/t.asm" 2> "$TMP/t.err"; then
+	if ! timeout 5 "$CSH" -o 0 -h < "$TMP/t.in" > "$TMP/t.asm" 2> "$TMP/t.err"; then
 		fail "$name" "exit=$? stderr=[$(cat "$TMP/t.err")]"
 		return
 	fi
@@ -1578,13 +1578,30 @@ DECLARE X BYTE
 X = 1
 EOF
 
-# -o adds the org-0 vectors and boot code, but not the header
-FLAGS=-o t_grep opt-org "org 0" "jp start" "ld sp, 0xDFF8" <<'EOF'
+# -o adds the startup vectors and boot code at the given
+# address, but not the header
+FLAGS="-o 0" t_grep opt-org "org 0" "jp start" "ld sp, 0xDFF8" <<'EOF'
 DECLARE X BYTE
 X = 1
 EOF
 
-FLAGS=-o t_nogrep opt-org-no-header "TMR SEGA" <<'EOF'
+FLAGS="-o 0" t_nogrep opt-org-no-header "TMR SEGA" <<'EOF'
+DECLARE X BYTE
+X = 1
+EOF
+
+# the address may be written as a PL/M constant or 0x hex
+FLAGS="-o 8000H" t_grep opt-org-hex "org 32768" "jp start" <<'EOF'
+DECLARE X BYTE
+X = 1
+EOF
+
+FLAGS="-o 0x2000" t_grep opt-org-0x "org 8192" "jp start" <<'EOF'
+DECLARE X BYTE
+X = 1
+EOF
+
+FLAGS="-o 32768" t_grep opt-org-decimal "org 32768" <<'EOF'
 DECLARE X BYTE
 X = 1
 EOF
@@ -1600,12 +1617,22 @@ DECLARE X BYTE
 X = 1
 EOF
 
-FLAGS="-o -h" t_grep opt-both "jp start" "seek 0x7ff0" <<'EOF'
+FLAGS="-o 0 -h" t_grep opt-both "jp start" "seek 0x7ff0" <<'EOF'
 DECLARE X BYTE
 X = 1
 EOF
 
 FLAGS=-z t_err opt-unknown 255 "unknown option" <<'EOF'
+DECLARE X BYTE
+X = 1
+EOF
+
+FLAGS=-o t_err opt-org-missing 255 "invalid address" <<'EOF'
+DECLARE X BYTE
+X = 1
+EOF
+
+FLAGS="-o zzz" t_err opt-org-bad 255 "invalid address" <<'EOF'
 DECLARE X BYTE
 X = 1
 EOF
