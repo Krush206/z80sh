@@ -1805,6 +1805,80 @@ DECLARE X BYTE
 X = 1
 EOF
 
+# Predefined flag variables: reading one yields 0FFH when the
+# Z80 flag is set, 00H when clear, after the PL/M-80 true/false
+# convention.  The test sees the flags of the preceding
+# instruction, and CARRY folds the flag into A with sbc.
+t_grep plm-carry-read "sbc a, a" <<'EOF'
+DECLARE X BYTE
+X = CARRY
+EOF
+
+t_grep plm-zero-read "ld a, 0FFH" "jr z, L[0-9]+" "xor a" <<'EOF'
+DECLARE X BYTE
+X = ZERO
+EOF
+
+t_grep plm-sign-read "ld a, 0FFH" "jp m, L[0-9]+" "xor a" <<'EOF'
+DECLARE X BYTE
+X = SIGN
+EOF
+
+t_grep plm-parity-read "ld a, 0FFH" "jp pe, L[0-9]+" "xor a" <<'EOF'
+DECLARE X BYTE
+X = PARITY
+EOF
+
+# flag names are ordinary identifiers for matching purposes:
+# case and embedded $ signs are ignored
+t_grep plm-flag-lowercase "sbc a, a" <<'EOF'
+DECLARE X BYTE
+x = carry
+EOF
+
+t_grep plm-flag-dollar "sbc a, a" <<'EOF'
+DECLARE X BYTE
+X = CA$RRY
+EOF
+
+# a flag read works anywhere an expression does
+t_grep plm-flag-in-if "ld a, 0FFH" "or a" "jr z, L[0-9]+" <<'EOF'
+DECLARE X BYTE
+IF ZERO THEN X = 1
+EOF
+
+t_ok plm-flag-in-expr <<'EOF'
+DECLARE X BYTE
+X = 1 + ZERO
+EOF
+
+# reading a flag into an ADDRESS variable widens the byte
+t_grep plm-flag-widen "ld l, a" "ld h, 0" "ld \(p\), hl" <<'EOF'
+DECLARE P ADDRESS
+P = ZERO
+EOF
+
+# longer names that merely start like a flag are not reserved
+t_ok plm-flag-prefix-own <<'EOF'
+DECLARE CARRYX BYTE
+DECLARE X BYTE
+CARRYX = 5
+X = CARRYX
+EOF
+
+# the flags may not be written or redeclared
+t_err plm-flag-assign 255 "illegal assignment to builtin variable" <<'EOF'
+CARRY = 1
+EOF
+
+t_err plm-flag-decl 255 "builtin variable name reserved" <<'EOF'
+DECLARE CARRY BYTE
+EOF
+
+t_err plm-flag-decl-dollar 255 "builtin variable name reserved" <<'EOF'
+DECLARE PAR$ITY ADDRESS
+EOF
+
 echo "----------------------------------------"
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" = "0" ]
