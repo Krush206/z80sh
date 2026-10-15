@@ -191,16 +191,18 @@ pack:
 /*
  * endOfFile
  *	end the program: an open DO..END group is a syntax
- *	error, else emit the halt and the ROM header
+ *	error, else emit the halt and, with -h, the ROM header
  */
 - (void) endOfFile
 {
 	if([self doDepth: args end: *argp] > 0)
 		[self error: ERR_SYNTAX code: 255];
 	printf("\thalt\n");
-	printf("\tseek 0x7ff0\n");
-	/* name has two trailing spaces; checksum stays 0 */
-	printf("\tdefb \"TMR SEGA  \",0,0,0,0,0,0x4c\n");
+	if(*carten != 0) {
+		printf("\tseek 0x7ff0\n");
+		/* name has two trailing spaces; checksum stays 0 */
+		printf("\tdefb \"TMR SEGA  \",0,0,0,0,0,0x4c\n");
+	}
 	exit(*errval);
 }
 
