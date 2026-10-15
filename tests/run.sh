@@ -806,8 +806,8 @@ DECLARE X BYTE
 X = SHL(1 + 2, 3 - 1)
 EOF
 
-t_ok builtin-time-expr <<'EOF'
-TIME(5 + 5);
+t_ok builtin-time-call <<'EOF'
+CALL TIME(5 + 5);
 EOF
 
 t_ok builtin-dec-nested-shift <<'EOF'
@@ -821,7 +821,22 @@ X = LOW(INPUT(220))
 EOF
 
 t_grep builtin-time "dec c" <<'EOF'
-TIME(10);
+CALL TIME(10);
+EOF
+
+# TIME is an untyped procedure: it is invoked with CALL and
+# rejected everywhere else, as in the reference compiler
+t_err time-not-expression 255 "syntax error" <<'EOF'
+DECLARE X BYTE;
+X = TIME(5);
+EOF
+
+t_err time-bare-statement 255 "syntax error" <<'EOF'
+TIME(5);
+EOF
+
+t_err time-no-argument 255 "syntax error" <<'EOF'
+CALL TIME;
 EOF
 
 t_grep builtin-dec "add a, b" "daa" <<'EOF'
@@ -1432,6 +1447,27 @@ MYFUNC: PROCEDURE;
     RETURN;
 END MYFUNC;
 END;
+EOF
+
+# a procedure may end without repeating its name, even when
+# more statements follow its END, as in the reference compiler
+t_grep proc-end-no-name-followed "Q_p:" "call Q_p" "ld a, 1" <<'EOF'
+M: DO;
+DECLARE X BYTE;
+P: PROCEDURE;
+RETURN;
+END;
+X = 1;
+CALL P;
+END M;
+EOF
+
+t_err proc-end-wrong-name 255 "syntax error" <<'EOF'
+M: DO;
+P: PROCEDURE;
+RETURN;
+END Q;
+END M;
 EOF
 
 # --- LITERALLY macros ---------------------------------------
