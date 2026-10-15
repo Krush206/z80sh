@@ -78,6 +78,7 @@
 #define TNOP 67
 #define TBY 68
 #define TDOFOR 69
+#define TBASED 70
 #define TMUL 20
 #define TDIV 21
 #define TMOD 22
@@ -115,6 +116,7 @@
 #define ERR_UNDECL ": undeclared"
 #define ERR_OPT ": unknown option"
 #define ERR_ORG ": invalid address"
+#define ERR_BASE ": invalid base"
 
 struct Keyword {
 	const char *kname;
@@ -141,6 +143,7 @@ struct Tree {
 	char symlab[SYMSIZ][SYMLABSIZ];
 	int symadr[SYMSIZ];
 	int symsiz[SYMSIZ];
+	int symbas[SYMSIZ];
 	char macnam[MACSIZ][SYMNAMSIZ];
 	char macval[MACSIZ][MACVSIZ];
 	int maclev[MACSIZ];
@@ -184,6 +187,7 @@ struct Tree {
 - (void) prologue;
 - (void) compileAddress: (struct Tree *) t;
 - (int) declareName: (char *) na type: (int) t;
+- (int) declareBased: (char *) na type: (int) t base: (char *) bn;
 - (int) declareArray: (char *) na type: (int) t size: (int) n;
 - (int) lookupName: (char *) na;
 - (int) arraySize: (int) i;
@@ -249,6 +253,7 @@ struct Tree {
 - (int) orgValue: (char *) s;
 - (struct Tree *) arrayDecl: (char **) p1 args: (char **) lp end: (char **) rp;
 - (struct Tree *) groupDecl: (char **) p1 args: (char **) lp end: (char **) rp;
+- (struct Tree *) declItem: (char **) w count: (int) n at: (int *) ip;
 - (struct Tree *) subscript: (char *) na args: (char **) lp end: (char **) rp;
 - (struct Tree *) arrayInfo: (int) k args: (char **) lp end: (char **) rp;
 - (void) stripDollar: (char *) s;
