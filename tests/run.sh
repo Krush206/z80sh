@@ -505,6 +505,108 @@ t_err plm-declare-short 255 "syntax error" <<'EOF'
 DECLARE X
 EOF
 
+# --- BASED variables: a name for the object at a base address -
+
+t_grep plm-based-byte "ld hl, \(p\)" "ld a, \(hl\)" "ld \(hl\), a" <<'EOF'
+DECLARE P ADDRESS
+DECLARE V BASED P BYTE
+DECLARE X BYTE
+X = V
+V = X
+EOF
+
+t_grep plm-based-word "ld h, \(hl\)" "ld \(hl\), e" "ld \(hl\), d" <<'EOF'
+DECLARE P ADDRESS
+DECLARE W BASED P ADDRESS
+DECLARE X ADDRESS
+X = W
+W = X
+EOF
+
+# a byte based on an address based reads the whole word, then
+# stores its low byte
+t_grep plm-based-mixed "ld hl, \(q\)" "ld h, \(hl\)" "ld hl, \(p\)" \
+	"ld \(hl\), a" <<'EOF'
+DECLARE P ADDRESS
+DECLARE Q ADDRESS
+DECLARE V BASED P BYTE
+DECLARE W BASED Q ADDRESS
+V = W
+EOF
+
+t_ok plm-based-group <<'EOF'
+DECLARE P ADDRESS
+DECLARE (V BASED P, W BASED P) BYTE
+V = 1
+W = 2
+EOF
+
+t_ok plm-based-comma <<'EOF'
+DECLARE P ADDRESS
+DECLARE B BYTE, V BASED P BYTE
+B = 1
+V = 2
+EOF
+
+# a based name declares no storage of its own
+t_nogrep plm-based-no-storage "^v:" <<'EOF'
+DECLARE P ADDRESS
+DECLARE V BASED P BYTE
+V = 1
+EOF
+
+t_ok plm-based-in-proc <<'EOF'
+DECLARE P ADDRESS
+F: PROCEDURE;
+DECLARE V BASED P BYTE
+V = 1
+END F;
+EOF
+
+t_ok plm-based-argument <<'EOF'
+DECLARE P ADDRESS
+DECLARE V BASED P BYTE
+F: PROCEDURE(X);
+DECLARE X BYTE
+OUTPUT(127) = X
+END F;
+CALL F(V)
+EOF
+
+t_err plm-based-reserved 255 "syntax error" <<'EOF'
+DECLARE BASED BYTE
+EOF
+
+t_err plm-based-undeclared-base 255 "undeclared" <<'EOF'
+DECLARE V BASED P BYTE
+EOF
+
+t_err plm-based-byte-base 255 "invalid base" <<'EOF'
+DECLARE B BYTE
+DECLARE V BASED B BYTE
+EOF
+
+t_err plm-based-array-base 255 "invalid base" <<'EOF'
+DECLARE A(4) BYTE
+DECLARE V BASED A BYTE
+EOF
+
+t_err plm-based-based-base 255 "invalid base" <<'EOF'
+DECLARE P ADDRESS
+DECLARE Q BASED P BYTE
+DECLARE V BASED Q BYTE
+EOF
+
+t_err plm-based-no-type 255 "syntax error" <<'EOF'
+DECLARE P ADDRESS
+DECLARE V BASED P
+EOF
+
+t_err plm-based-initial 255 "syntax error" <<'EOF'
+DECLARE P ADDRESS
+DECLARE V BASED P BYTE INITIAL(1)
+EOF
+
 # --- PL/M statements -----------------------------------------
 
 t_ok plm-if-then-else <<'EOF'
