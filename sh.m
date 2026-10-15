@@ -91,7 +91,8 @@ loop:
 	do {
 		cp = *linep;
 		[self word];
-	} while(*cp != '\n' || [self doDepth: args end: *argp] > 0);
+	} while(*cp != '\n' || [self doDepth: args end: *argp] > 0 ||
+	    [self labelHang: args end: *argp]);
 	*treec = 0;
 	t = [self syntax: args end: *argp];
 	[self compileTree: t];
