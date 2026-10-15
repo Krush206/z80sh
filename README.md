@@ -18,10 +18,10 @@ outside the language (no C-like spellings) is accepted.
   `LINE$COUNT` and `LINECOUNT` name one variable.
 - Comments are `/* ... */` only.
 - One input line compiles alone unless a `DO`/`END` group
-  or a `PROCEDURE` body spans lines, so keep `ELSE` on the
-  same line as its `IF` or wrap the statement in a `DO`
-  group. A final line without a trailing newline still
-  compiles.
+  or a `PROCEDURE` body spans lines, or the line ends in
+  `label:`; keep `ELSE` on the same line as its `IF` or
+  wrap the statement in a `DO` group. A final line without
+  a trailing newline still compiles.
 
 ## Character set
 
@@ -129,8 +129,8 @@ branch, so prefer a variable there.
   `ELSE` binds to the nearest open `IF`.
 - `GOTO label;` and `GO TO label;`: supported. A label is
   declared by `DECLARE label LABEL;` or implicitly by
-  `label: statement;`; forward references resolve in the
-  assembler.
+  `label: statement;`; the statement may start on the next
+  line, and forward references resolve in the assembler.
 - `DISABLE;` / `ENABLE;` (interrupts off/on): supported.
 - `HALT;`: supported.
 - `CALL name;` and `CALL name(args);` invoke a void
@@ -187,7 +187,9 @@ body in header order, exactly as in PL/M-80. The result is
 `BYTE` (left in `A`) or `ADDRESS` (left in `HL`); a void
 procedure is invoked with `CALL` and a typed one in an
 expression, again after PL/M-80. `RETURN;` and
-`RETURN expression;` both work.
+`RETURN expression;` both work. The `name:` and `PROCEDURE`
+may be split by a line break, and statements may follow
+`END name;` inside the same block, as PL/M-80 allows.
 
 Calls follow the PL/M-80 convention: a single argument
 arrives in `C`; with two or more, the last is in `E` and the
@@ -237,7 +239,7 @@ never freed) and run the suite:
 
 The suite rebuilds the compiler and checks exit codes,
 diagnostics, emitted assembly and final image bytes for
-184 programs, including one rejection test per non-PL/M
+189 programs, including one rejection test per non-PL/M
 spelling (`int`, `==`, `!=`, `!`, `&&`, `||`, `&`, `|`,
 `^`, `%`, bare `WHILE`, `THEN`-less `IF`, `{`/`}`,
 `//` comments).
