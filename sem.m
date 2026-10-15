@@ -121,6 +121,24 @@ static int leadingDecls(struct Tree *body, struct Tree **dst, int max)
 }
 
 /*
+ * builtinVarCode
+ *	0 when name is not a built-in variable, otherwise
+ *	1=CARRY, 2=ZERO, 3=SIGN, 4=PARITY
+ */
+- (int) builtinVarCode: (char *) name
+{
+	if([self nameEq: name other: "carry"])
+		return 1;
+	if([self nameEq: name other: "zero"])
+		return 2;
+	if([self nameEq: name other: "sign"])
+		return 3;
+	if([self nameEq: name other: "parity"])
+		return 4;
+	return 0;
+}
+
+/*
  * exprType
  *	0 when the tree evaluates to a BYTE (left in A), 1
  *	when it is an ADDRESS value (left in HL); after the
@@ -138,13 +156,16 @@ static int leadingDecls(struct Tree *body, struct Tree **dst, int max)
 		if([self numberValue: t->DARR[0]] > 255)
 			return(1);
 		return(0);
-	case TVAR:
-	case TDECL:
-	case TADDR:
+	case TVAR: {
+		if([self builtinVarCode: t->DARR[0]])
+			return(0);
 		i = [self lookupName: t->DARR[0]];
 		if(i < 0)
 			return(0);
 		return [self symbolType: i];
+	}
+	case TDECL:
+	case TADDR:
 	case TSUBSCRIPT:
 		i = [self procIndex: t->DARR[0]];
 		if(i >= 0)
@@ -212,7 +233,39 @@ static int leadingDecls(struct Tree *body, struct Tree **dst, int max)
 		printf("\tld a, %s\n", t->DARR[0]);
 		[self toHL];
 		return;
-	case TVAR:
+	case TVAR: {
+		int bv = [self builtinVarCode: t->DARR[0]];
+		if(bv) {
+			[self compileBuiltinVar: bv];
+			[self toHL];
+			return;
+		}
+		i = [self lookupName: t->DARR[0]];
+		if(i < 0) {
+			[self printString: t->DARR[0]];
+			[self error: ERR_UNDECL code: 255];
+		}
+		if(symbas[i] >= 0) {
+			/* a based object read through its pointer */
+			printf("\tld hl, (%s)\n", symlab[symbas[i]]);
+			printf("\tld a, (hl)\n");
+			if([self symbolType: i]) {
+				printf("\tinc hl\n");
+				printf("\tld h, (hl)\n");
+				printf("\tld l, a\n");
+				return;
+			}
+			[self toHL];
+			return;
+		}
+		if([self symbolType: i]) {
+			printf("\tld hl, (%s)\n", symlab[i]);
+			return;
+		}
+		printf("\tld a, (%s)\n", symlab[i]);
+		[self toHL];
+		return;
+	}
 	case TDECL:
 	case TADDR:
 		i = [self lookupName: t->DARR[0]];
@@ -240,6 +293,7 @@ static int leadingDecls(struct Tree *body, struct Tree **dst, int max)
 		printf("\tld a, (%s)\n", symlab[i]);
 		[self toHL];
 		return;
+
 	default:
 		[self compileTree: t];
 		if(![self exprType: t])
@@ -289,6 +343,46 @@ static int leadingDecls(struct Tree *body, struct Tree **dst, int max)
     printf("\tld a, c\n");
 }
 
+/*
+ * compileBuiltinVar
+ *	generate code to leave 0FFH in A when the Z80 flag is
+ *	set, 00H when it is clear.  The flag is tested before
+ *	any flag-altering instruction is emitted, so the value
+ *	reflects the flags left by the preceding instruction,
+ *	after the PL/M-80 convention.
+ */
+- (void) compileBuiltinVar: (int) bv
+{
+	int l;
+
+	switch(bv) {
+	case 1: /* CARRY */
+		printf("\tsbc a, a\n");
+		return;
+	case 2: /* ZERO */
+		l = (*lblc)++;
+		printf("\tld a, 0FFH\n");
+		printf("\tjr z, L%d\n", l);
+		printf("\txor a\n");
+		printf("L%d:\n", l);
+		return;
+	case 3: /* SIGN */
+		l = (*lblc)++;
+		printf("\tld a, 0FFH\n");
+		printf("\tjp m, L%d\n", l);
+		printf("\txor a\n");
+		printf("L%d:\n", l);
+		return;
+	case 4: /* PARITY */
+		l = (*lblc)++;
+		printf("\tld a, 0FFH\n");
+		printf("\tjp pe, L%d\n", l);
+		printf("\txor a\n");
+		printf("L%d:\n", l);
+		return;
+	}
+}
+
 - (void) compileTree: (struct Tree *) t
 {
     if (t == 0)
@@ -315,7 +409,13 @@ static int leadingDecls(struct Tree *body, struct Tree **dst, int max)
 
         case TVAR: {
             register int i;
+            int bv;
 
+            bv = [self builtinVarCode: t->DARR[0]];
+            if(bv) {
+                [self compileBuiltinVar: bv];
+                break;
+            }
             i = [self lookupName: t->DARR[0]];
             if(i < 0) {
                 [self printString: t->DARR[0]];
@@ -572,6 +672,10 @@ static int leadingDecls(struct Tree *body, struct Tree **dst, int max)
             if(lt == TDECL || lt == TADDR) {
                 /* A declaration on the left reserves its space first */
                 [self compileTree: t->DLEF];
+            }
+            if(lt == TVAR && [self builtinVarCode: t->DLEF->DARR[0]]) {
+                [self printString: t->DLEF->DARR[0]];
+                [self error: "illegal assignment to builtin variable" code: 255];
             }
             i = [self lookupName: t->DLEF->DARR[0]];
             if(i < 0) {
@@ -1612,6 +1716,10 @@ static int leadingDecls(struct Tree *body, struct Tree **dst, int max)
 	register int i, size;
 	unsigned char c;
 
+	if([self builtinVarCode: na]) {
+		[self printString: na];
+		[self error: "builtin variable name reserved" code: 255];
+	}
 	for(i = *symc - 1; i >= 0 && symlev[i] == *scope; i--)
 		if(nameEqual(symnam[i], na)) {
 			[self printString: na];
