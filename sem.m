@@ -70,6 +70,16 @@ static int nameEqual(const char *a, const char *b)
 }
 
 /*
+ * scalarDecl
+ *	true when s is a BYTE or ADDRESS declaration node; such
+ *	nodes open a procedure body as its parameter list
+ */
+static int scalarDecl(struct Tree *s)
+{
+	return s->DTYP == TDECL || s->DTYP == TADDR;
+}
+
+/*
  * leadingDecls
  *	fill dst with the leading DECLARE leaves of a
  *	procedure body in source order, at most max; the
@@ -85,15 +95,15 @@ static int leadingDecls(struct Tree *body, struct Tree **dst, int max)
 	for(w = body; w != 0 && n < max; w = w->DRIT) {
 		s = w->DTYP == TLST ? w->DLEF : w;
 		while(s != 0 && n < max) {
-			if(s->DTYP == TDECL)
+			if(scalarDecl(s))
 				leaf = s;
 			else if(s->DTYP == TLST && s->DLEF != 0 &&
-			    s->DLEF->DTYP == TDECL)
+			    scalarDecl(s->DLEF))
 				leaf = s->DLEF;
 			else
 				return(n);
 			dst[n++] = leaf;
-			s = s->DTYP == TDECL ? 0 : s->DRIT;
+			s = scalarDecl(s) ? 0 : s->DRIT;
 		}
 	}
 	return(n);
@@ -1384,8 +1394,9 @@ static int leadingDecls(struct Tree *body, struct Tree **dst, int max)
 /*
  * emitArgs
  *	evaluate the argument chain into the callee's
- *	registers: byte values, last in E, prior in C,
- *	earlier pushed left-to-right
+ *	registers: 16-bit values, last in DE (E for a byte),
+ *	prior in BC (C for a byte), earlier pushed
+ *	left-to-right
  */
 - (void) emitArgs: (struct Tree *) list
 {
@@ -1400,24 +1411,23 @@ static int leadingDecls(struct Tree *body, struct Tree **dst, int max)
 		}
 		av[n++] = p->DLEF;
 	}
-	/* evaluate every argument left to right, keeping the
-	   results on the stack: a later argument that is itself
-	   a call would otherwise clobber C or E */
+	/* evaluate every argument left to right as a 16-bit
+	   value, keeping the results on the stack: a later
+	   argument that is itself a call would otherwise
+	   clobber C, E or the pair registers */
 	for(i = 0; i < n; i++) {
-		[self compileTree: av[i]];
-		if([self exprType: av[i]])
-			printf("\tld a, l\n");
-		printf("\tpush af\n");
+		[self compile16: av[i]];
+		printf("\tpush hl\n");
 	}
-	/* a lone argument goes to C; with two or more the last
-	   is E and the one before it C, after PL/M-80; earlier
+	/* a lone argument goes to BC; with two or more the last
+	   is DE and the one before it BC, after PL/M-80; earlier
 	   ones stay on the stack for the callee to pop, arg0
 	   deepest */
 	if(n == 1)
-		printf("\tpop af\n\tld c, a\n");
+		printf("\tpop bc\n");
 	else if(n >= 2) {
-		printf("\tpop af\n\tld e, a\n");
-		printf("\tpop af\n\tld c, a\n");
+		printf("\tpop de\n");
+		printf("\tpop bc\n");
 	}
 }
 
@@ -1452,6 +1462,22 @@ static int leadingDecls(struct Tree *body, struct Tree **dst, int max)
 		putchar(*s++);
 	}
 	printf("\n");
+}
+
+/*
+ * storeParam
+ *	store one procedure parameter from registers; lo is C
+ *	or E, the low-order register the caller left it in;
+ *	an ADDRESS parameter also takes the partner B or D
+ */
+- (void) storeParam: (int) i lo: (char) lo
+{
+	printf("\tld hl, %s\n", symlab[i]);
+	printf("\tld (hl), %c\n", lo);
+	if(symtyp[i] == TADDR) {
+		printf("\tinc hl\n");
+		printf("\tld (hl), %c\n", lo == 'c' ? 'b' : 'd');
+	}
 }
 
 /*
@@ -1528,33 +1554,26 @@ static int leadingDecls(struct Tree *body, struct Tree **dst, int max)
 			[self error: ERR_SYNTAX code: 255];
 		}
 		prcadr[pi][i] = [self declareName: decls[i]->DARR[0]
-		    type: TDECL];
+		    type: decls[i]->DTYP];
 		printf("%s:\tequ 0x%X\n", symlab[prcadr[pi][i]],
 		    symadr[prcadr[pi][i]]);
 		decls[i]->DTYP = TNOP;
 	}
-	/* entry stores: a lone parameter arrives in C; with two
-	   or more the last is in E and the one before it in C;
-	   the rest are popped back off the stack */
-	if(npar == 1) {
-		i = prcadr[pi][0];
-		printf("\tld hl, %s\n", symlab[i]);
-		printf("\tld (hl), c\n");
-	}
+	/* entry stores: a lone parameter arrives in C or BC;
+	   with two or more the last is in E or DE and the one
+	   before it in C or BC; the rest are popped off the
+	   stack, arg0 deepest */
+	if(npar == 1)
+		[self storeParam: prcadr[pi][0] lo: 'c'];
 	if(npar >= 2) {
-		i = prcadr[pi][npar - 1];
-		printf("\tld hl, %s\n", symlab[i]);
-		printf("\tld (hl), e\n");
-		i = prcadr[pi][npar - 2];
-		printf("\tld hl, %s\n", symlab[i]);
-		printf("\tld (hl), c\n");
+		[self storeParam: prcadr[pi][npar - 1] lo: 'e'];
+		[self storeParam: prcadr[pi][npar - 2] lo: 'c'];
 	}
 	if(npar >= 3) {
 		printf("\tpop de\n");
 		for(i = npar - 3; i >= 0; i--) {
 			printf("\tpop bc\n");
-			printf("\tld hl, %s\n", symlab[prcadr[pi][i]]);
-			printf("\tld (hl), c\n");
+			[self storeParam: prcadr[pi][i] lo: 'c'];
 		}
 		printf("\tpush de\n");
 	}
