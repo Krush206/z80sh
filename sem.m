@@ -70,6 +70,145 @@ static int nameEqual(const char *a, const char *b)
 }
 
 @implementation Shell (Semantic)
+/*
+ * symbolType
+ *	the declared type of symbol i: TADDR counts as 16-bit
+ *	ADDRESS, every other entry is a BYTE
+ */
+- (int) symbolType: (int) i
+{
+	return symtyp[i] == TADDR ? 1 : 0;
+}
+
+/*
+ * exprType
+ *	0 when the tree evaluates to a BYTE (left in A), 1
+ *	when it is an ADDRESS value (left in HL); after the
+ *	PL/M-80 promotion rules, with MUL/DIV/MOD keeping
+ *	their operands' width here
+ */
+- (int) exprType: (struct Tree *) t
+{
+	int i;
+
+	if(t == NULL)
+		return(0);
+	switch(t->DTYP) {
+	case TNUM:
+		if([self numberValue: t->DARR[0]] > 255)
+			return(1);
+		return(0);
+	case TVAR:
+	case TDECL:
+	case TADDR:
+		i = [self lookupName: t->DARR[0]];
+		if(i < 0)
+			return(0);
+		return [self symbolType: i];
+	case TSUBSCRIPT:
+		i = [self lookupName: t->DARR[0]];
+		if(i < 0)
+			return(0);
+		return [self symbolType: i];
+	case TDOUBLE:
+		return(1);
+	case TPAR:
+		return [self exprType: t->DSTR];
+	case TASG:
+		return [self exprType: t->DLEF];
+	case TADD:
+	case TSUB:
+	case TOR:
+	case TXOR:
+	case TAND:
+	case TOR2:
+	case TAND2:
+		if([self exprType: t->DLEF] || [self exprType: t->DRIT])
+			return(1);
+		return(0);
+	case TMUL:
+	case TDIV:
+	case TMOD:
+		if([self exprType: t->DLEF] || [self exprType: t->DRIT])
+			return(1);
+		return(0);
+	default:
+		return(0);
+	}
+}
+
+/*
+ * toHL
+ *	widen the byte in A into HL with a zero high byte
+ */
+- (void) toHL
+{
+	printf("\tld l, a\n");
+	printf("\tld h, 0\n");
+}
+
+/*
+ * compile16
+ *	leave the value of t in HL; byte trees widen with
+ *	high-order zeroes, after PL/M-80
+ */
+- (void) compile16: (struct Tree *) t
+{
+	int i;
+
+	if(t == NULL) {
+		printf("\tld hl, 0\n");
+		return;
+	}
+	switch(t->DTYP) {
+	case TNUM:
+		if([self numberValue: t->DARR[0]] > 255) {
+			printf("\tld hl, %s\n", t->DARR[0]);
+			return;
+		}
+		printf("\tld a, %s\n", t->DARR[0]);
+		[self toHL];
+		return;
+	case TVAR:
+	case TDECL:
+	case TADDR:
+		i = [self lookupName: t->DARR[0]];
+		if(i < 0) {
+			[self printString: t->DARR[0]];
+			[self error: ERR_UNDECL code: 255];
+		}
+		if([self symbolType: i]) {
+			printf("\tld hl, (%s)\n", symlab[i]);
+			return;
+		}
+		printf("\tld a, (%s)\n", symlab[i]);
+		[self toHL];
+		return;
+	default:
+		[self compileTree: t];
+		if(![self exprType: t])
+			[self toHL];
+		return;
+	}
+}
+
+/*
+ * pair16
+ *	the left and right children of a 16-bit binary node
+ *	into HL and DE
+ */
+- (void) pair16: (struct Tree *) t
+{
+	[self compile16: t->DRIT];
+	printf("\tpush hl\n");
+	[self compile16: t->DLEF];
+	printf("\tpop de\n");
+}
+
+/*
+ * compileShift
+ *	8-bit rotate/shift by count, zero count keeps value
+ */
 - (void) compileShift: (struct Tree *) t op: (const char *) op
 {
     int lp, dn;
@@ -106,9 +245,17 @@ static int nameEqual(const char *a, const char *b)
 
     switch(t->DTYP) {
 
+        case TNOP:
+            /* parameter declaration absorbed into the
+               procedure entry; nothing to compile */
+            break;
+
         case TNUM:
-            // Load literal 8-bit number directly into accumulator
-            printf("\tld a, %s\n", t->DARR[0]);
+            // 16-bit literals land in HL, the rest in A
+            if([self numberValue: t->DARR[0]] > 255)
+                printf("\tld hl, %s\n", t->DARR[0]);
+            else
+                printf("\tld a, %s\n", t->DARR[0]);
             break;
 
         case TVAR: {
@@ -122,12 +269,20 @@ static int nameEqual(const char *a, const char *b)
             if([self arraySize: i] > 0) {
                 [self error: ERR_SYNTAX code: 255];
             }
-            // Load 8-bit variable value into accumulator
-            printf("\tld a, (%s)\n", symlab[i]);
+            // Address values load into HL, bytes into A
+            if([self symbolType: i])
+                printf("\tld hl, (%s)\n", symlab[i]);
+            else
+                printf("\tld a, (%s)\n", symlab[i]);
             break;
         }
 
         case TADD:
+            if([self exprType: t]) {
+                [self pair16: t];
+                printf("\tadd hl, de\n");
+                break;
+            }
             // 1. Evaluate Right branch
             [self compileTree: t->DRIT];
             // 2. Push result to stack
@@ -141,6 +296,16 @@ static int nameEqual(const char *a, const char *b)
             break;
 
         case TSUB:
+            if([self exprType: t]) {
+                [self pair16: t];
+                printf("\tld a, l\n");
+                printf("\tsub e\n");
+                printf("\tld l, a\n");
+                printf("\tld a, h\n");
+                printf("\tsbc a, d\n");
+                printf("\tld h, a\n");
+                break;
+            }
             [self compileTree: t->DRIT];
             printf("\tpush af\n");
             [self compileTree: t->DLEF];
@@ -170,9 +335,108 @@ static int nameEqual(const char *a, const char *b)
             int i;
 
             /* Name RAM for every array element */
-            i = [self declareArray: t->DARR[0] type: TDECL
-                size: [self numberValue: t->DARR[1]]];
+            if(t->DARR[2] != 0)
+                i = [self declareArray: t->DARR[0] type: TADDR
+                    size: [self numberValue: t->DARR[1]]];
+            else
+                i = [self declareArray: t->DARR[0] type: TDECL
+                    size: [self numberValue: t->DARR[1]]];
             printf("%s:\tequ 0x%X\n", symlab[i], symadr[i]);
+            break;
+        }
+
+        case TDATA: {
+            int i, n, sz, lb;
+
+            /* ROM storage constant: name gets the ROM
+               label and a size so M(i) subscripts work */
+            i = [self declareName: t->DARR[0] type: TDATA];
+            n = 1;
+            while(t->DARR[n] != 0)
+                n++;
+            sz = n - 1;
+            symsiz[i] = sz;
+            lb = (*lblc)++;
+            printf("\tjp L%d\n", lb);
+            printf("%s:\tdefb ", symlab[i]);
+            for(n = 1; t->DARR[n] != 0; n++) {
+                if(t->DARR[n][0] & QUOTE)
+                    [self stringBytes: t->DARR[n]];
+                else
+                    printf("%s", t->DARR[n]);
+                if(t->DARR[n+1] != 0)
+                    printf(",");
+            }
+            printf("\n");
+            printf("L%d:\n", lb);
+            break;
+        }
+
+        case TINITIAL: {
+            int i, n, sz, count, lb, lb2, ty, emitted;
+            char *w, *s;
+
+            /* preset bytes copied from ROM into the
+               freshly allocated RAM at program load */
+            ty = (t->DARR[2] != 0) ? 1 : 0;
+            if(t->DARR[1] != 0) {
+                n = [self numberValue: t->DARR[1]];
+                i = [self declareArray: t->DARR[0]
+                    type: (ty ? TADDR : TDECL) size: n];
+            }
+            else {
+                n = 1;
+                i = [self declareName: t->DARR[0]
+                    type: (ty ? TADDR : TDECL)];
+            }
+            sz = n * (ty ? 2 : 1);
+            printf("%s:\tequ 0x%X\n", symlab[i], symadr[i]);
+            count = [self numberValue: t->DARR[3]];
+            lb = (*lblc)++;
+            lb2 = (*lblc)++;
+            printf("\tld hl, DBL%d\n", lb);
+            printf("\tld de, %s\n", symlab[i]);
+            printf("\tld bc, %d\n", sz);
+            printf("\tldir\n");
+            printf("\tjp L%d\n", lb2);
+            printf("DBL%d:\n", lb);
+            printf("\tdefb ");
+            emitted = 0;
+            for(n = 0; n < count; n++) {
+                w = t->DARR[4 + n];
+                if(w == 0)
+                    break;
+                if(w[0] & QUOTE) {
+                    for(s = w; (*s & 0177) != 0; s++) {
+                        if(emitted > 0)
+                            printf(",");
+                        printf("%d", *s & 0177);
+                        emitted++;
+                    }
+                }
+                else if(ty) {
+                    /* address constants go low then high */
+                    if(emitted > 0)
+                        printf(",");
+                    printf("%d", [self numberValue: w] & 255);
+                    if(emitted + 1 < sz)
+                        printf(",");
+                    printf("%d", [self numberValue: w] >> 8);
+                    emitted += 2;
+                }
+                else {
+                    if(emitted > 0)
+                        printf(",");
+                    printf("%s", w);
+                    emitted++;
+                }
+            }
+            while(emitted < sz) {
+                printf(emitted > 0 ? ",0" : "0");
+                emitted++;
+            }
+            printf("\n");
+            printf("L%d:\n", lb2);
             break;
         }
 
@@ -191,11 +455,27 @@ static int nameEqual(const char *a, const char *b)
             }
             if(lt == TSUBSCRIPT) {
                 /* store into an array element */
-                [self compileTree: t->DRIT];
-                printf("\tpush af\n");
-                [self compileIndex: t->DLEF];
-                printf("\tpop af\n");
-                printf("\tld (hl), a\n");
+                i = [self lookupName: t->DLEF->DARR[0]];
+                if(i < 0) {
+                    [self printString: t->DLEF->DARR[0]];
+                    [self error: ERR_UNDECL code: 255];
+                }
+                if([self symbolType: i]) {
+                    [self compile16: t->DRIT];
+                    printf("\tpush hl\n");
+                    [self compileIndex: t->DLEF];
+                    printf("\tpop de\n");
+                    printf("\tld (hl), e\n");
+                    printf("\tinc hl\n");
+                    printf("\tld (hl), d\n");
+                }
+                else {
+                    [self compileTree: t->DRIT];
+                    printf("\tpush af\n");
+                    [self compileIndex: t->DLEF];
+                    printf("\tpop af\n");
+                    printf("\tld (hl), a\n");
+                }
                 break;
             }
             if(lt == TOUTPUT) {
@@ -227,13 +507,17 @@ static int nameEqual(const char *a, const char *b)
                 [self error: ERR_SYNTAX code: 255];
             }
             // Evaluate expression value on the right branch
-            [self compileTree: t->DRIT];
-            // Store the accumulator value into the variable on the left
-            printf("\tld (%s), a\n", symlab[i]);
-            if(lt == TADDR) {
-                /* addresses hold two bytes; the high one is zero */
-                printf("\txor a\n");
-                printf("\tld (%s+1), a\n", symlab[i]);
+            if([self symbolType: i]) {
+                /* address variable: store the whole HL pair */
+                [self compile16: t->DRIT];
+                printf("\tld (%s), hl\n", symlab[i]);
+            }
+            else {
+                [self compileTree: t->DRIT];
+                if([self exprType: t->DRIT])
+                    printf("\tld a, l\n");
+                // Store the accumulator value into the variable
+                printf("\tld (%s), a\n", symlab[i]);
             }
             break;
         }
@@ -253,11 +537,22 @@ static int nameEqual(const char *a, const char *b)
         case TEQU: {
             register int lt, ln;
 
-            [self compileTree: t->DRIT];
-            printf("\tpush af\n");
-            [self compileTree: t->DLEF];
-            printf("\tpop bc\n");
-            printf("\tcp b\n");
+            if([self exprType: t->DLEF] || [self exprType: t->DRIT]) {
+                [self pair16: t];
+                printf("\tld a, l\n");
+                printf("\txor e\n");
+                printf("\tld b, a\n");
+                printf("\tld a, h\n");
+                printf("\txor d\n");
+                printf("\tor b\n");
+            }
+            else {
+                [self compileTree: t->DRIT];
+                printf("\tpush af\n");
+                [self compileTree: t->DLEF];
+                printf("\tpop bc\n");
+                printf("\tcp b\n");
+            }
             lt = (*lblc)++;
             ln = (*lblc)++;
             printf("\tjr z, L%d\n", lt);
@@ -272,11 +567,22 @@ static int nameEqual(const char *a, const char *b)
         case TNEQ: {
             register int lt, ln;
 
-            [self compileTree: t->DRIT];
-            printf("\tpush af\n");
-            [self compileTree: t->DLEF];
-            printf("\tpop bc\n");
-            printf("\tcp b\n");
+            if([self exprType: t->DLEF] || [self exprType: t->DRIT]) {
+                [self pair16: t];
+                printf("\tld a, l\n");
+                printf("\txor e\n");
+                printf("\tld b, a\n");
+                printf("\tld a, h\n");
+                printf("\txor d\n");
+                printf("\tor b\n");
+            }
+            else {
+                [self compileTree: t->DRIT];
+                printf("\tpush af\n");
+                [self compileTree: t->DLEF];
+                printf("\tpop bc\n");
+                printf("\tcp b\n");
+            }
             lt = (*lblc)++;
             ln = (*lblc)++;
             printf("\tjr nz, L%d\n", lt);
@@ -291,13 +597,25 @@ static int nameEqual(const char *a, const char *b)
         case TGTR: {
             register int lf, ln;
 
-            [self compileTree: t->DRIT];
-            printf("\tpush af\n");
-            [self compileTree: t->DLEF];
-            printf("\tpop bc\n");
-            printf("\tcp b\n");
             lf = (*lblc)++;
             ln = (*lblc)++;
+            if([self exprType: t->DLEF] || [self exprType: t->DRIT]) {
+                [self pair16: t];
+                printf("\tld a, h\n");
+                printf("\tcp d\n");
+                printf("\tjr nz, L%d\n", ln);
+                printf("\tld a, l\n");
+                printf("\tcp e\n");
+                printf("L%d:\n", ln);
+                ln = (*lblc)++;
+            }
+            else {
+                [self compileTree: t->DRIT];
+                printf("\tpush af\n");
+                [self compileTree: t->DLEF];
+                printf("\tpop bc\n");
+                printf("\tcp b\n");
+            }
             printf("\tjr z, L%d\n", lf);
             printf("\tjr c, L%d\n", lf);
             printf("\tld a, 1\n");
@@ -311,13 +629,25 @@ static int nameEqual(const char *a, const char *b)
         case TLSS: {
             register int lt, ln;
 
-            [self compileTree: t->DRIT];
-            printf("\tpush af\n");
-            [self compileTree: t->DLEF];
-            printf("\tpop bc\n");
-            printf("\tcp b\n");
             lt = (*lblc)++;
             ln = (*lblc)++;
+            if([self exprType: t->DLEF] || [self exprType: t->DRIT]) {
+                [self pair16: t];
+                printf("\tld a, h\n");
+                printf("\tcp d\n");
+                printf("\tjr nz, L%d\n", ln);
+                printf("\tld a, l\n");
+                printf("\tcp e\n");
+                printf("L%d:\n", ln);
+                ln = (*lblc)++;
+            }
+            else {
+                [self compileTree: t->DRIT];
+                printf("\tpush af\n");
+                [self compileTree: t->DLEF];
+                printf("\tpop bc\n");
+                printf("\tcp b\n");
+            }
             printf("\tjr c, L%d\n", lt);
             printf("\tld a, 0\n");
             printf("\tjr L%d\n", ln);
@@ -330,13 +660,25 @@ static int nameEqual(const char *a, const char *b)
         case TGEQ: {
             register int lf, ln;
 
-            [self compileTree: t->DRIT];
-            printf("\tpush af\n");
-            [self compileTree: t->DLEF];
-            printf("\tpop bc\n");
-            printf("\tcp b\n");
             lf = (*lblc)++;
             ln = (*lblc)++;
+            if([self exprType: t->DLEF] || [self exprType: t->DRIT]) {
+                [self pair16: t];
+                printf("\tld a, h\n");
+                printf("\tcp d\n");
+                printf("\tjr nz, L%d\n", ln);
+                printf("\tld a, l\n");
+                printf("\tcp e\n");
+                printf("L%d:\n", ln);
+                ln = (*lblc)++;
+            }
+            else {
+                [self compileTree: t->DRIT];
+                printf("\tpush af\n");
+                [self compileTree: t->DLEF];
+                printf("\tpop bc\n");
+                printf("\tcp b\n");
+            }
             printf("\tjr c, L%d\n", lf);
             printf("\tld a, 1\n");
             printf("\tjr L%d\n", ln);
@@ -349,13 +691,25 @@ static int nameEqual(const char *a, const char *b)
         case TLEQ: {
             register int lt, ln;
 
-            [self compileTree: t->DRIT];
-            printf("\tpush af\n");
-            [self compileTree: t->DLEF];
-            printf("\tpop bc\n");
-            printf("\tcp b\n");
             lt = (*lblc)++;
             ln = (*lblc)++;
+            if([self exprType: t->DLEF] || [self exprType: t->DRIT]) {
+                [self pair16: t];
+                printf("\tld a, h\n");
+                printf("\tcp d\n");
+                printf("\tjr nz, L%d\n", ln);
+                printf("\tld a, l\n");
+                printf("\tcp e\n");
+                printf("L%d:\n", ln);
+                ln = (*lblc)++;
+            }
+            else {
+                [self compileTree: t->DRIT];
+                printf("\tpush af\n");
+                [self compileTree: t->DLEF];
+                printf("\tpop bc\n");
+                printf("\tcp b\n");
+            }
             printf("\tjr c, L%d\n", lt);
             printf("\tjr z, L%d\n", lt);
             printf("\tld a, 0\n");
@@ -370,12 +724,22 @@ static int nameEqual(const char *a, const char *b)
             register int lt, ln;
 
             [self compileTree: t->DLEF];
-            printf("\tor a\n");
+            if([self exprType: t->DLEF]) {
+                printf("\tld a, l\n");
+                printf("\tor h\n");
+            }
+            else
+                printf("\tor a\n");
             lt = (*lblc)++;
             ln = (*lblc)++;
             printf("\tjr nz, L%d\n", lt);
             [self compileTree: t->DRIT];
-            printf("\tor a\n");
+            if([self exprType: t->DRIT]) {
+                printf("\tld a, l\n");
+                printf("\tor h\n");
+            }
+            else
+                printf("\tor a\n");
             printf("\tjr nz, L%d\n", lt);
             printf("\tld a, 0\n");
             printf("\tjr L%d\n", ln);
@@ -389,12 +753,22 @@ static int nameEqual(const char *a, const char *b)
             register int lf, ln;
 
             [self compileTree: t->DLEF];
-            printf("\tor a\n");
+            if([self exprType: t->DLEF]) {
+                printf("\tld a, l\n");
+                printf("\tor h\n");
+            }
+            else
+                printf("\tor a\n");
             lf = (*lblc)++;
             ln = (*lblc)++;
             printf("\tjr z, L%d\n", lf);
             [self compileTree: t->DRIT];
-            printf("\tor a\n");
+            if([self exprType: t->DRIT]) {
+                printf("\tld a, l\n");
+                printf("\tor h\n");
+            }
+            else
+                printf("\tor a\n");
             printf("\tjr z, L%d\n", lf);
             printf("\tld a, 1\n");
             printf("\tjr L%d\n", ln);
@@ -405,6 +779,16 @@ static int nameEqual(const char *a, const char *b)
         }
 
         case TOR:
+            if([self exprType: t]) {
+                [self pair16: t];
+                printf("\tld a, l\n");
+                printf("\tor e\n");
+                printf("\tld l, a\n");
+                printf("\tld a, h\n");
+                printf("\tor d\n");
+                printf("\tld h, a\n");
+                break;
+            }
             [self compileTree: t->DRIT];
             printf("\tpush af\n");
             [self compileTree: t->DLEF];
@@ -413,6 +797,16 @@ static int nameEqual(const char *a, const char *b)
             break;
 
         case TXOR:
+            if([self exprType: t]) {
+                [self pair16: t];
+                printf("\tld a, l\n");
+                printf("\txor e\n");
+                printf("\tld l, a\n");
+                printf("\tld a, h\n");
+                printf("\txor d\n");
+                printf("\tld h, a\n");
+                break;
+            }
             [self compileTree: t->DRIT];
             printf("\tpush af\n");
             [self compileTree: t->DLEF];
@@ -421,6 +815,16 @@ static int nameEqual(const char *a, const char *b)
             break;
 
         case TAND:
+            if([self exprType: t]) {
+                [self pair16: t];
+                printf("\tld a, l\n");
+                printf("\tand e\n");
+                printf("\tld l, a\n");
+                printf("\tld a, h\n");
+                printf("\tand d\n");
+                printf("\tld h, a\n");
+                break;
+            }
             [self compileTree: t->DRIT];
             printf("\tpush af\n");
             [self compileTree: t->DLEF];
@@ -566,10 +970,72 @@ static int nameEqual(const char *a, const char *b)
             printf("\tld a, (hl)\n");
             break;
 
-        case TSUBSCRIPT:
-            [self compileIndex: t];
-            printf("\tld a, (hl)\n");
+        case TLDEF:
+            /* label prefix: just mark the address */
+            [self emitLabel: t->DARR[0]];
+            printf(":\n");
             break;
+
+        case TGOTO:
+            printf("\tjp ");
+            [self emitLabel: t->DARR[0]];
+            printf("\n");
+            break;
+
+        case TCALL:
+            [self emitCall: t];
+            break;
+
+        case TRETURN: {
+            int pi;
+
+            pi = *inProc - 1;
+            if(pi < 0) {
+                [self error: ERR_SYNTAX code: 255];
+            }
+            if(t->DLEF != 0) {
+                if(prcret[pi] == 0) {
+                    [self error: ERR_SYNTAX code: 255];
+                }
+                if(prcret[pi] == 2)
+                    [self compile16: t->DLEF];
+                else {
+                    [self compileTree: t->DLEF];
+                    if([self exprType: t->DLEF])
+                        printf("\tld a, l\n");
+                }
+            }
+            else if(prcret[pi] != 0) {
+                [self error: ERR_SYNTAX code: 255];
+            }
+            printf("\tret\n");
+            break;
+        }
+
+        case TPROCEDURE:
+            [self defineProc: t];
+            break;
+
+        case TSUBSCRIPT: {
+            int i;
+
+            i = [self lookupName: t->DARR[0]];
+            if(i < 0) {
+                [self printString: t->DARR[0]];
+                [self error: ERR_UNDECL code: 255];
+            }
+            [self compileIndex: t];
+            if([self symbolType: i]) {
+                /* address array element is a 16-bit value */
+                printf("\tld a, (hl)\n");
+                printf("\tinc hl\n");
+                printf("\tld h, (hl)\n");
+                printf("\tld l, a\n");
+            }
+            else
+                printf("\tld a, (hl)\n");
+            break;
+        }
 
         case TINPUT:
             /* PL/M INPUT(port): byte value from the port */
@@ -641,19 +1107,34 @@ static int nameEqual(const char *a, const char *b)
             break;
 
         case TLOW:
-            /* low byte of a byte value is itself */
-            [self compileTree: t->DLEF];
+            /* low byte of an address value, after PL/M-80 */
+            if([self exprType: t->DLEF]) {
+                [self compileTree: t->DLEF];
+                printf("\tld a, l\n");
+            }
+            else
+                [self compileTree: t->DLEF];
             break;
 
         case THIGH:
-            /* high byte of a byte value is zero */
-            [self compileTree: t->DLEF];
-            printf("\tld a, 0\n");
+            /* high byte of an address value; bytes have none */
+            if([self exprType: t->DLEF]) {
+                [self compileTree: t->DLEF];
+                printf("\tld a, h\n");
+            }
+            else {
+                [self compileTree: t->DLEF];
+                printf("\tld a, 0\n");
+            }
             break;
 
         case TDOUBLE:
-            /* zero-extended byte is itself */
+            /* byte widened into an address value */
             [self compileTree: t->DLEF];
+            if(![self exprType: t->DLEF]) {
+                printf("\tld l, a\n");
+                printf("\tld h, 0\n");
+            }
             break;
 
         case TDISABLE:
@@ -720,7 +1201,8 @@ static int nameEqual(const char *a, const char *b)
 {
     int i;
 
-    /* hl aims at the array element; a holds the index */
+    /* hl aims at the array element; a holds the index;
+       address arrays index by two bytes per element */
     i = [self lookupName: t->DARR[0]];
     if(i < 0) {
         [self printString: t->DARR[0]];
@@ -734,14 +1216,224 @@ static int nameEqual(const char *a, const char *b)
     printf("\tld hl, %s\n", symlab[i]);
     printf("\tld d, 0\n");
     printf("\tadd hl, de\n");
+    if([self symbolType: i])
+        printf("\tadd hl, de\n");
+}
+
+- (void) emitLabel: (char *) na
+{
+
+
+
+	/* canonical assembler name for a PL/M label:
+	   lower case, $ removed, L_ prefix keeps them off
+	   the user namespace */
+	char c;
+
+	printf("L_");
+	while((c = *na++) != 0) {
+		if(c == '$')
+			continue;
+		if(c >= 'A' && c <= 'Z')
+			c = c + 'a' - 'A';
+		putchar(c);
+	}
+}
+
+/*
+ * procIndex
+ *	the slot of a defined procedure named na, or -1
+ */
+- (int) procIndex: (char *) na
+{
+	int i;
+
+	for(i = *prcc - 1; i >= 0; i--)
+		if(nameEqual(prcnam[i], na))
+			return(i);
+	return(-1);
+}
+
+/*
+ * emitArgs
+ *	evaluate the argument chain into the callee's
+ *	registers: byte values, last in E, prior in C,
+ *	earlier pushed left-to-right
+ */
+- (void) emitArgs: (struct Tree *) list
+{
+	struct Tree *av[MAXPARS];
+	struct Tree *p;
+	int n, i;
+
+	n = 0;
+	for(p = list; p != 0; p = p->DRIT) {
+		if(n == MAXPARS) {
+			[self error: ERR_LARGE code: 255];
+		}
+		av[n++] = p->DLEF;
+	}
+	for(i = 0; i < n; i++) {
+		if(i < n - 2) {
+			[self compileTree: av[i]];
+			if([self exprType: av[i]])
+				printf("\tld a, l\n");
+			printf("\tpush af\n");
+		}
+	}
+	for(i = n - 2; i < n; i++) {
+		if(i < 0)
+			continue;
+		[self compileTree: av[i]];
+		if([self exprType: av[i]])
+			printf("\tld a, l\n");
+		printf(i == n - 1 ? "\tld e, a\n" : "\tld c, a\n");
+	}
+}
+
+/*
+ * emitCall
+ *	call a defined procedure; its result type comes
+ *	from the procedure table so expression sites can
+ *	place A or HL
+ */
+- (void) emitCall: (struct Tree *) t
+{
+	int pi;
+	char *s;
+
+	pi = [self procIndex: t->DARR[0]];
+	if(pi < 0) {
+		[self printString: t->DARR[0]];
+		[self error: ERR_UNDECL code: 255];
+	}
+	[self emitArgs: t->DLEF];
+	s = prcnam[pi];
+	printf("\tcall Q_");
+	while(*s != 0) {
+		putchar(*s++);
+	}
+	printf("\n");
+}
+
+/*
+ * defineProc
+ *	a procedure definition: register it, skip over its
+ *	body, declare the params in header order, emit the
+ *	entry stores, compile the body, then return
+ */
+- (void) defineProc: (struct Tree *) t
+{
+	int pi, npar, ret, i, n, lv, ra, skip;
+	struct Tree *w, *leaf;
+	char *s, *d;
+
+	if(*prcc == PROCSIZ) {
+		[self error: ERR_LARGE code: 255];
+	}
+	pi = (*prcc)++;
+	s = t->DARR[0];
+	d = prcnam[pi];
+	while(*s != 0) {
+		char c;
+
+		c = *s++;
+		if(c == '$')
+			continue;
+		if(c >= 'A' && c <= 'Z')
+			c = c + 'a' - 'A';
+		*d++ = c;
+	}
+	*d = '\0';
+	npar = [self numberValue: t->DARR[2]];
+	ret = 0;
+	if(t->DARR[1] != 0) {
+		s = t->DARR[1];
+		ret = 1;
+		if(*s == 'a' || *s == 'A')
+			ret = 2;
+	}
+	prcnpar[pi] = npar;
+	prcret[pi] = ret;
+	/* params become block-level storage */
+	lv = *scope;
+	n = *symc;
+	ra = *ramc;
+	(*scope)++;
+	*inProc = pi + 1;
+	skip = (*lblc)++;
+	printf("\tjp L%d\n", skip);
+	printf("Q_%s:\n", prcnam[pi]);
+	/*
+	 * The body's leading DECLAREs allocate the params.
+	 * They must be in header order, and get marked TNOP
+	 * so the body compile below allocates them once.
+	 */
+	i = 0;
+	for(w = t->DLEF; w != 0 && i < npar; ) {
+		if(w->DTYP != TLST || w->DLEF == 0)
+			break;
+		leaf = w->DLEF;
+		if(leaf->DTYP != TDECL)
+			break;
+		if(i == 0)
+			leaf = w->DLEF;
+		if(nameEqual(leaf->DARR[0], t->DARR[3 + i])) {
+			prcadr[pi][i] = [self declareName: leaf->DARR[0]
+			    type: TDECL];
+			leaf->DTYP = TNOP;
+			i++;
+			if(i == npar)
+				break;
+		}
+		w = w->DRIT;
+	}
+	if(i != npar) {
+		[self printString: t->DARR[0]];
+		[self error: ERR_SYNTAX code: 255];
+	}
+	/* entry stores: last param in E, prior in C, rest
+	   popped back off the stack */
+	if(npar >= 1) {
+		i = prcadr[pi][npar - 1];
+		printf("\tld hl, %s\n", symlab[i]);
+		printf("\tld (hl), e\n");
+	}
+	if(npar >= 2) {
+		i = prcadr[pi][npar - 2];
+		printf("\tld hl, %s\n", symlab[i]);
+		printf("\tld (hl), c\n");
+	}
+	if(npar >= 3) {
+		printf("\tpop de\n");
+		for(i = npar - 3; i >= 0; i--) {
+			printf("\tpop bc\n");
+			printf("\tld hl, %s\n", symlab[prcadr[pi][i]]);
+			printf("\tld (hl), c\n");
+		}
+		printf("\tpush de\n");
+	}
+	[self compileTree: t->DLEF];
+	printf("\tret\n");
+	printf("L%d:\n", skip);
+	*inProc = 0;
+	*symc = n;
+	*ramc = ra;
+	*scope = lv;
 }
 
 - (void) compileAddress: (struct Tree *) t
 {
-	/* hl holds the pointer value of t, which is a TDEREF node */
-	[self compileTree: t->DLEF];
-	printf("\tld l, a\n");
-	printf("\tld h, 0\n");
+	/* hl holds the pointer value of t, which is a TDEREF node;
+	   the pointer is now a real 16-bit value */
+	if([self exprType: t->DLEF]) {
+		[self compileTree: t->DLEF];
+	}
+	else {
+		[self compileTree: t->DLEF];
+		printf("\tld l, a\n");
+		printf("\tld h, 0\n");
+	}
 }
 
 - (int) declareName: (char *) na type: (int) t
@@ -797,7 +1489,7 @@ static int nameEqual(const char *a, const char *b)
 - (int) declareArray: (char *) na type: (int) t size: (int) n
 {
 	char *s, *d;
-	int i;
+	int i, size;
 	unsigned char c;
 
 	for(i = *symc - 1; i >= 0 && symlev[i] == *scope; i--)
@@ -830,12 +1522,13 @@ static int nameEqual(const char *a, const char *b)
 		   strand their LENGTH past ld a */
 		[self error: ERR_LARGE code: 255];
 	}
-	if(*ramc + n > STACKP) {
+	size = (t == TADDR) ? 2 * n : n;
+	if(*ramc + size > STACKP) {
 		/* keep clear of the stack base and the reserved top eight */
 		[self error: ERR_LARGE code: 255];
 	}
 	symadr[*symc] = *ramc;
-	*ramc += n;
+	*ramc += size;
 	if(*scope == 0)
 		(void) strcpy(symlab[*symc], symnam[*symc]);
 	else {
