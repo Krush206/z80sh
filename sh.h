@@ -31,6 +31,9 @@
 #define TDECL 17
 #define TADD 18
 #define TSUB 19
+#define TMUL 20
+#define TDIV 21
+#define TMOD 22
 #define TADDR 23
 #define TIF 24
 #define TWHILE 25
@@ -79,9 +82,6 @@
 #define TBY 68
 #define TDOFOR 69
 #define TBASED 70
-#define TMUL 20
-#define TDIV 21
-#define TMOD 22
 #define DTYP t_dtyp
 #define DLEF t_dlef
 #define DRIT t_drit
@@ -92,8 +92,8 @@
 #define DINT t_darr[ARGSIZ-1]
 
 #define LINSIZ 4000
-#define ARGSIZ 200
-#define TRESIZ 200
+#define ARGSIZ 1000
+#define TRESIZ 1000
 #define NUMSIZ 12
 #define SYMSIZ 50
 #define SYMNAMSIZ 32
@@ -231,6 +231,7 @@ struct Tree {
 - (int) wordIs: (char *) w name: (const char *) s;
 - (int) nameOk: (char *) na;
 - (int) doDepth: (char **) p1 end: (char **) p2;
+- (int) parenDepth: (char **) p1 end: (char **) p2;
 - (int) labelHang: (char **) p1 end: (char **) p2;
 - (char **) matchEnd: (char **) p1 end: (char **) p2;
 - (char **) endPast: (char **) m end: (char **) p2;
