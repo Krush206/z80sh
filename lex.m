@@ -195,7 +195,8 @@ pack:
  */
 - (void) endOfFile
 {
-	if([self doDepth: args end: *argp] > 0)
+	if([self doDepth: args end: *argp] > 0 ||
+	    [self parenDepth: args end: *argp] > 0)
 		[self error: ERR_SYNTAX code: 255];
 	printf("\thalt\n");
 	if(*carten != 0) {
