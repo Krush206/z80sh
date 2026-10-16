@@ -116,8 +116,14 @@ loop:
 	do {
 		cp = *linep;
 		[self word];
+		/* a newline under an unbalanced ( is inside a
+		   list or expression: plain noise between words;
+		   elsewhere a newline separates statements */
+		if(*cp == '\n' && [self parenDepth: args end: *argp] > 0)
+			(*argp)--;
 	} while(*cp != '\n' || [self doDepth: args end: *argp] > 0 ||
-	    [self labelHang: args end: *argp]);
+	    [self labelHang: args end: *argp] ||
+	    [self parenDepth: args end: *argp] > 0);
 	*treec = 0;
 	t = [self syntax: args end: *argp];
 	[self compileTree: t];
