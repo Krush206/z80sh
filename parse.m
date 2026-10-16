@@ -1874,6 +1874,32 @@ static struct Keyword keyw[] = {
 }
 
 /*
+ * parenDepth
+ *	unmatched ( count in the word range; a list or
+ *	expression left open at end of line means the line
+ *	continues, so INITIAL data and long expressions may
+ *	span lines; quoted words never match
+ */
+- (int) parenDepth: (char **) p1 end: (char **) p2
+{
+	char **p;
+	int l;
+
+	if(p2 == NULL)
+		return(0);
+	l = 0;
+	for(p=p1; p!=p2; p++) {
+		if(*p == NULL)
+			continue;
+		if(strcmp(*p, "(") == 0)
+			l++;
+		else if(strcmp(*p, ")") == 0)
+			l--;
+	}
+	return(l);
+}
+
+/*
  * matchEnd
  *	the END word closing the DO at p1, or 0 when the
  *	range holds none; nested DO..END pairs are skipped
