@@ -1726,6 +1726,51 @@ t_ok initial-sized <<'EOF'
 DECLARE D (3) INITIAL (1, 2, 3);
 EOF
 
+# --- multi-line parenthesized lists and expressions ----------
+
+# the reader keeps a logical line open while a ( is
+# unmatched, so INITIAL and DATA data may span lines
+t_grep initial-multiline "defb 1,2,3,4" <<'EOF'
+DECLARE D (4) BYTE INITIAL (1, 2,
+3, 4);
+EOF
+
+t_ok data-multiline <<'EOF'
+DECLARE D (3) DATA (1,
+2, 3);
+EOF
+
+# comments may sit inside the list, as in a font table
+t_grep initial-multiline-comment "defb 7eh,42h,00h,11h" <<'EOF'
+DECLARE F (4) BYTE INITIAL (
+/* top row */ 7eh, 42h,
+/* bottom row */ 00h, 11h);
+EOF
+
+# a parenthesized expression may span lines
+t_ok expr-multiline-paren <<'EOF'
+DECLARE X BYTE
+X = (1 +
+2)
+EOF
+
+# a call argument list may span lines
+t_ok call-args-multiline <<'EOF'
+T: PROCEDURE (A, B) BYTE;
+    DECLARE (A, B) BYTE;
+    RETURN A + B;
+END T;
+DECLARE R BYTE
+R = T(1,
+2)
+EOF
+
+# a ( left open at end of file is a syntax error
+t_err paren-unterminated 255 "syntax error" <<'EOF'
+DECLARE X BYTE
+X = (1 + 2
+EOF
+
 # --- source form --------------------------------------------
 
 # A final line with no trailing newline must still compile.
